@@ -1,0 +1,78 @@
+{
+  "package_id": "qilingsecurity-rules",
+  "version": "2026.03.11-r1",
+  "label": "Qiling Security Rules Pack",
+  "min_plugin_version": "1.16.0",
+  "rules_sha256": "REQUIRED_64_HEX_SHA256_OF_RULES_OBJECT",
+  "signer": "qiling-official-v1",
+  "rules_signature": "REQUIRED_BASE64_RSA_SHA256_SIGNATURE",
+  "rules": {
+    "code_vulnerability_patterns": {
+      "RCE": "/\\b(system|exec|shell_exec|passthru|proc_open|popen)\\s*\\(/i",
+      "SSRF": "/\\b(curl_exec|wp_remote_get|fsockopen)\\s*\\(.*(\\$_GET|\\$_POST|\\$_REQUEST)/i",
+      "WRITE": "/\\b(file_put_contents|fwrite)\\s*\\(.*(\\$_GET|\\$_POST|\\$_REQUEST)/i"
+    },
+    "component_vulnerability_feed": [
+      {
+        "id": "PLUGIN:CONTACT-FORM-7:CVE-2026-0001",
+        "component_type": "plugin",
+        "slug": "contact-form-7",
+        "title": "Contact Form 7 unauthenticated option update",
+        "severity": "critical",
+        "affected_versions": ">=5.0,<5.9.4",
+        "fixed_in": "5.9.4",
+        "reference": "https://example.com/advisories/contact-form-7-cve-2026-0001",
+        "source": "wordfence",
+        "cve": "CVE-2026-0001"
+      }
+    ],
+    "scan_api_endpoints": {
+      "/wp-json/wp/v2/users": "用户枚举 (User Enumeration)",
+      "/xmlrpc.php": "XML-RPC (容易被滥用发起 DDoS 或爆破密码)"
+    },
+    "dark_link_patterns": [
+      "display:[[:space:]]*none",
+      "position:[[:space:]]*absolute",
+      "base64_decode",
+      "<iframe"
+    ],
+    "persistence_suspicious_keywords": [
+      "base64",
+      "eval",
+      "shell",
+      "payload",
+      "backdoor",
+      "malware",
+      "inject",
+      "cmd",
+      "remote"
+    ],
+    "db_suspicious_option_name_patterns": [
+      "payload",
+      "backdoor",
+      "malware",
+      "shell",
+      "inject",
+      "spam",
+      "eval",
+      "base64",
+      "hidden_link",
+      "seo_spam"
+    ],
+    "db_suspicious_option_value_patterns": [
+      "<script",
+      "<iframe",
+      "base64_decode",
+      "gzinflate",
+      "document.write",
+      "fromcharcode",
+      "data:text/html",
+      "onerror=",
+      "onload=",
+      "shell_exec",
+      "eval(",
+      "assert(",
+      "javascript:"
+    ]
+  }
+}

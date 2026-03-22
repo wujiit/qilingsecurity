@@ -1,0 +1,796 @@
+.qs-wrap {
+    max-width: 1380px;
+    margin: 20px auto;
+}
+
+.qs-title {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 30px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.qs-title .dashicons {
+    font-size: 32px;
+    width: 32px;
+    height: 32px;
+    color: #2271b1;
+}
+
+.qs-dashboard-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+}
+
+.qs-panel {
+    background: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 4px;
+    padding: 20px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, .04);
+}
+
+.qs-panel h2 {
+    margin-top: 0;
+    font-size: 18px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.qs-inline-notice {
+    margin: 16px 0;
+    padding: 12px 14px;
+    border-left: 4px solid #3b82f6;
+    border-radius: 4px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.qs-inline-notice.qs-inline-notice-warning {
+    background: #fff7ed;
+    border-left-color: #f59e0b;
+    color: #9a3412;
+}
+
+.qs-runtime-note {
+    margin-top: 6px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    line-height: 1.6;
+}
+
+.qs-runtime-note.qs-runtime-note-info {
+    background: #f8fafc;
+    color: #334155;
+}
+
+.qs-runtime-note.qs-runtime-note-warning {
+    background: #fff7ed;
+    color: #9a3412;
+}
+
+.qs-toolbar-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 14px 0 18px;
+}
+
+.qs-toolbar-meta {
+    color: #475569;
+    font-size: 13px;
+}
+
+.qs-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.qs-panel .form-table {
+    table-layout: fixed;
+}
+
+.qs-panel .form-table th {
+    width: 220px;
+    padding-right: 20px;
+}
+
+.qs-panel .form-table td {
+    width: auto;
+}
+
+.qs-panel .form-table .qs-setting-field[type="text"] {
+    width: min(100%, 720px);
+    min-width: 320px;
+}
+
+.qs-panel .form-table .qs-setting-field[type="number"] {
+    width: min(100%, 180px);
+}
+
+.qs-panel .form-table textarea.qs-setting-field {
+    width: min(100%, 860px);
+    min-width: 360px;
+    min-height: 110px;
+}
+
+.qs-panel .form-table select.qs-setting-field {
+    width: min(100%, 420px);
+    min-width: 260px;
+}
+
+.qs-panel .form-table code {
+    display: inline-block;
+    margin-bottom: 8px;
+}
+
+.qs-baseline-toolbar {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px dashed #cbd5e1;
+}
+
+.qs-baseline-toolbar .qs-toolbar-meta span {
+    display: inline-block;
+    margin-top: 4px;
+    line-height: 1.6;
+    word-break: break-word;
+}
+
+.button-hero {
+    padding: 10px 30px !important;
+    font-size: 16px !important;
+    height: auto !important;
+    line-height: normal !important;
+    margin-top: 15px !important;
+}
+
+/* 进度条 */
+.qs-progress-bar {
+    width: 100%;
+    height: 20px;
+    background: #e2e8f0;
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.qs-progress-fill {
+    height: 100%;
+    background: #22c55e;
+    width: 0%;
+    transition: width 0.4s ease;
+}
+
+/* Result Tags */
+.qs-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+}
+
+.qs-badge.critical {
+    background: #ef4444;
+}
+
+.qs-badge.warning {
+    background: #f59e0b;
+}
+
+.qs-badge.success {
+    background: #10b981;
+}
+
+.qs-badge.info {
+    background: #3b82f6;
+}
+
+.qs-badge.neutral {
+    background: #64748b;
+}
+
+.qs-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.qs-result-row.is-status-resolved {
+    background: #f0fdf4;
+}
+
+.qs-result-row.is-status-ignored {
+    background: #f8fafc;
+    opacity: 0.8;
+}
+
+.qs-stat-box {
+    padding: 15px;
+    border-radius: 6px;
+    text-align: center;
+    background: #f8f9fa;
+    border: 1px solid #ddd;
+}
+
+.qs-stat-box strong {
+    display: block;
+    margin: 10px 0 5px;
+}
+
+.qs-stat-box .dashicons {
+    font-size: 40px;
+    width: 40px;
+    height: 40px;
+    color: #64748b;
+}
+
+/* Nginx Code Block */
+.qs-nginx-code-block {
+    background: #0f172a;
+    color: #f1f5f9;
+    padding: 24px;
+    border-radius: 12px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-x: auto;
+    border: 1px solid #1e293b;
+    margin-top: 20px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+.qs-nginx-code-block code {
+    color: inherit;
+    background: none;
+    padding: 0;
+    font-family: inherit;
+}
+
+.qs-notice-box {
+    background: #fef2f2;
+    border-left: 4px solid #ef4444;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+}
+
+.qs-notice-box h4 {
+    margin-top: 0;
+    color: #991b1b;
+    margin-bottom: 8px;
+}
+
+.qs-notice-box p {
+    margin-bottom: 0;
+    font-size: 13px;
+    color: #7f1d1d;
+}
+
+.qs-maintenance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin: 18px 0;
+}
+
+.qs-rules-actions input[type="file"] {
+    max-width: 320px;
+}
+
+#qs-rules-message {
+    display: inline-block;
+    min-height: 20px;
+}
+
+.qs-analytics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 18px;
+}
+
+.qs-analytics-panels {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.qs-analytics-card {
+    text-align: left;
+}
+
+.qs-analytics-card strong {
+    margin: 0 0 10px;
+    color: #334155;
+}
+
+.qs-analytics-card-value {
+    display: block;
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.qs-analytics-card p {
+    margin: 10px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #64748b;
+}
+
+.qs-analytics-card-info {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+}
+
+.qs-analytics-card-safe {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+.qs-analytics-card-warning {
+    background: #fff7ed;
+    border-color: #fed7aa;
+}
+
+.qs-analytics-card-danger {
+    background: #fef2f2;
+    border-color: #fecaca;
+}
+
+.qs-analytics-list {
+    display: grid;
+    gap: 14px;
+}
+
+.qs-analytics-list-item {
+    display: grid;
+    gap: 8px;
+}
+
+.qs-analytics-list-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+.qs-analytics-list-label {
+    color: #334155;
+    word-break: break-word;
+}
+
+.qs-analytics-bar {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.qs-analytics-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2563eb, #0ea5e9);
+}
+
+.qs-trend-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 16px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.qs-trend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.qs-trend-dot-danger,
+.qs-trend-bar-danger {
+    background: #ef4444;
+}
+
+.qs-trend-dot-warning,
+.qs-trend-bar-warning {
+    background: #f59e0b;
+}
+
+.qs-trend-dot-info,
+.qs-trend-bar-info {
+    background: #3b82f6;
+}
+
+.qs-trend-table {
+    display: grid;
+    gap: 12px;
+}
+
+.qs-trend-row {
+    display: grid;
+    grid-template-columns: 60px minmax(0, 1fr) 120px;
+    align-items: center;
+    gap: 14px;
+}
+
+.qs-trend-day {
+    font-weight: 600;
+    color: #334155;
+}
+
+.qs-trend-bars {
+    display: grid;
+    gap: 8px;
+}
+
+.qs-trend-bar-group {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+}
+
+.qs-trend-bar {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    min-width: 0;
+}
+
+.qs-trend-values {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    text-align: right;
+    color: #334155;
+    font-size: 12px;
+}
+
+.qs-iprisk-metrics .qs-analytics-card-value {
+    font-size: 24px;
+}
+
+.qs-iprisk-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.qs-iprisk-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 1.2;
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #334155;
+}
+
+.qs-iprisk-tag small {
+    color: #64748b;
+}
+
+.qs-iprisk-tag-public {
+    background: #eff6ff;
+    border-color: #bfdbfe;
+    color: #1d4ed8;
+}
+
+.qs-iprisk-tag-key {
+    background: #ecfdf5;
+    border-color: #bbf7d0;
+    color: #047857;
+}
+
+.qs-iprisk-tag-fallback {
+    background: #fff7ed;
+    border-color: #fed7aa;
+    color: #c2410c;
+}
+
+.qs-iprisk-tag-signal {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+    color: #4338ca;
+}
+
+.qs-iprisk-ip-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.qs-iprisk-score {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.qs-iprisk-table th,
+.qs-iprisk-table td {
+    vertical-align: middle;
+}
+
+.qs-iprisk-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.qs-iprisk-table-wrap .qs-iprisk-table {
+    min-width: 980px;
+}
+
+.qs-iprisk-detail-panel {
+    margin-top: 18px;
+    padding: 16px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.qs-iprisk-detail-panel h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+
+.qs-iprisk-detail-meta {
+    color: #334155;
+    margin-bottom: 12px;
+}
+
+.qs-iprisk-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.qs-iprisk-detail-grid h4 {
+    margin: 0 0 8px;
+    color: #334155;
+}
+
+.qs-iprisk-detail-providers {
+    display: grid;
+    gap: 10px;
+}
+
+.qs-iprisk-provider-card {
+    border: 1px solid #dbe2ea;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    padding: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    position: relative;
+}
+
+.qs-iprisk-provider-card::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    border-radius: 8px 0 0 8px;
+    background: #94a3b8;
+}
+
+.qs-iprisk-provider-card-ok::before {
+    background: #16a34a;
+}
+
+.qs-iprisk-provider-card-error::before {
+    background: #dc2626;
+}
+
+.qs-iprisk-provider-card-skipped::before {
+    background: #64748b;
+}
+
+.qs-iprisk-provider-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.qs-iprisk-provider-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    color: #64748b;
+    font-size: 12px;
+    margin-bottom: 8px;
+}
+
+.qs-iprisk-provider-meta span {
+    background: #eef2ff;
+    border: 1px solid #dbeafe;
+    color: #334155;
+    border-radius: 999px;
+    padding: 2px 8px;
+}
+
+.qs-iprisk-provider-highlights {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 10px;
+}
+
+.qs-iprisk-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    border: 1px solid #cbd5e1;
+    padding: 4px 10px;
+    font-size: 12px;
+    line-height: 1.2;
+    background: #f8fafc;
+    color: #334155;
+}
+
+.qs-iprisk-pill-label {
+    font-weight: 600;
+}
+
+.qs-iprisk-pill-value {
+    opacity: 0.95;
+}
+
+.qs-iprisk-pill-danger {
+    border-color: #ef4444;
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.qs-iprisk-pill-ok {
+    border-color: #34d399;
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.qs-iprisk-pill-info {
+    border-color: #60a5fa;
+    background: #eff6ff;
+    color: #1d4ed8;
+}
+
+.qs-iprisk-pill-neutral {
+    border-color: #cbd5e1;
+    background: #f8fafc;
+    color: #475569;
+}
+
+.qs-iprisk-provider-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 10px;
+    background: #ffffff;
+    margin-top: 8px;
+}
+
+.qs-iprisk-provider-section-title {
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 6px;
+}
+
+.qs-iprisk-provider-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 6px 10px;
+}
+
+.qs-iprisk-provider-field {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12px;
+    border-bottom: 1px dashed #e5e7eb;
+    padding-bottom: 6px;
+    padding-top: 2px;
+}
+
+.qs-iprisk-provider-field:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
+.qs-iprisk-provider-field-label {
+    color: #64748b;
+}
+
+.qs-iprisk-provider-field-value {
+    color: #0f172a;
+    text-align: right;
+    word-break: break-all;
+}
+
+.qs-iprisk-provider-empty {
+    font-size: 12px;
+    color: #64748b;
+}
+
+.qs-iprisk-provider-status {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.qs-iprisk-provider-status-ok {
+    color: #15803d;
+}
+
+.qs-iprisk-provider-status-error {
+    color: #b91c1c;
+}
+
+.qs-iprisk-provider-status-skipped {
+    color: #64748b;
+}
+
+@media (max-width: 960px) {
+    .qs-dashboard-grid,
+    .qs-analytics-panels {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 782px) {
+    .qs-panel .form-table th,
+    .qs-panel .form-table td {
+        display: block;
+        width: 100%;
+        padding-right: 0;
+    }
+
+    .qs-panel .form-table .qs-setting-field[type="text"],
+    .qs-panel .form-table .qs-setting-field[type="number"],
+    .qs-panel .form-table textarea.qs-setting-field,
+    .qs-panel .form-table select.qs-setting-field {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .qs-trend-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .qs-trend-values {
+        text-align: left;
+    }
+
+    .qs-iprisk-detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
