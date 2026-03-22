@@ -11,7 +11,7 @@
 
 ## 2. 目前有多少功能
 
-按当前版本统计（基于代码）：
+按当前版本统计：
 
 - `11` 个主要功能标签（不含“使用说明”页）
 - `12` 项深度扫描步骤
@@ -376,26 +376,6 @@
 普通站点用户只需要这一步。  
 你收到官方提供的 `package-signed.json` 后直接导入即可，不需要接触 `rules/` 目录、签名脚本或 Wordfence 转换脚本。
 
-### 13.4 官方发布侧（运维/开发）
-
-以下内容属于启灵官方或内部发布工具链，普通用户可以忽略：
-
-- 模板：`rules/package-template.json`
-- 签名脚本：`rules/sign-package.php`
-- Wordfence 漏洞情报总包生成脚本：`rules/build-wordfence-package.mjs`
-- 说明：`rules/README.md`
-
-示例命令：
-
-```bash
-php sign-package.php \
-  --in package-template.json \
-  --out package-signed.json \
-  --private-key /secure/path/qiling-official-private.pem \
-  --signer qiling-official-v1
-```
-
----
 
 ## 14. 不依赖 WP-Cron 说明
 
@@ -427,7 +407,7 @@ php sign-package.php \
 
 ---
 
-## 16. 二次开发与扩展（避免写死）
+## 16. 二次开发与扩展
 
 插件已预留大量 Filter，可按项目扩展，而不是改核心代码。  
 常用扩展点包括：
