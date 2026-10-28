@@ -167,8 +167,8 @@ class QS_Scanner {
                                 'SENSITIVE_FILE_CRITICAL',
                                 $rel_path,
                                 'critical',
-                                "发现高度敏感的文件泄露 ({$filename})，黑客可直接通过浏览器下载！这会导致订单、密码等核心数据被脱裤。",
-                                '请立即通过 FTP 彻底删除此文件！如果是项目必需的运行日志（如 debug.log），请将其移动到网站根目录之外，或者在宝塔/Nginx 配置中严格拦截对 .log 和 .sql 后缀文件的 HTTP 访问。'
+                                "发现高度敏感的文件泄露 ({$filename})，攻击者可能直接通过浏览器下载，导致订单、密码等核心数据泄露。",
+                                '建议立即通过 FTP 删除此文件。若为项目必需的运行日志（如 debug.log），需移动到网站根目录之外，或在宝塔/Nginx 配置中严格拦截对 .log 和 .sql 后缀文件的 HTTP 访问。'
                             );
                         } else {
                             QS_DB::insert_result(
@@ -192,7 +192,7 @@ class QS_Scanner {
                         'GIT_EXPOSURE',
                         $rel_path,
                         'critical',
-                        '发现 .git 版本控制目录，极易导致全站源码与敏感配置泄露！',
+                        '发现 .git 版本控制目录，可能导致全站源码与敏感配置泄露。',
                         '强烈建议立即删除线上的 .git 隐藏目录，或配置 Nginx/Apache 规则彻底屏蔽对 /.git/ 目录的外部访问。'
                     );
                     $matches[] = $rel_path;
@@ -252,8 +252,8 @@ class QS_Scanner {
                         'WEBSHELL_FILE',
                         $rel_path,
                         'critical',
-                        'Uploads 上传目录中发现了危险可执行后缀文件，极大概率是绕过上传限制后留下的后门或恶意载荷！',
-                        '请立即核查该文件是否为您主动上传；如果无法确认来源，请优先隔离或删除，并同时检查媒体上传权限和上传拦截规则是否已开启。'
+                        'Uploads 上传目录中发现危险可执行后缀文件，可能是绕过上传限制后留下的后门或恶意载荷。',
+                        '建议立即核查该文件是否为管理员主动上传；无法确认来源时，优先隔离或删除，并检查媒体上传权限和上传拦截规则是否已开启。'
                     );
                     $matches[] = $rel_path;
 
@@ -269,7 +269,7 @@ class QS_Scanner {
                         $rel_path,
                         'critical',
                         '文件包含双重后缀 (如 .php.jpg)，可能被用于绕过上传限制造成解析漏洞。',
-                        '此类文件极度可疑，建议立即删除，并通知技术排查是否有攻击者正在尝试上传绕过。'
+                        '该类文件风险较高，建议立即删除，并安排技术排查上传绕过来源。'
                     );
                     $matches[] = $rel_path;
                 }
@@ -282,8 +282,8 @@ class QS_Scanner {
                             'WEBSHELL_CONTENT',
                             $rel_path,
                             'critical',
-                            '图片文件内部疑似被注入了木马执行代码 (如 eval, system)！',
-                            '这绝对是恶意文件！攻击者将 PHP 恶意代码嵌入了图片中。请立即删除此图片，并排查服务器是否存在本地文件包含漏洞 (LFI)。'
+                            '图片文件内部疑似被注入木马执行代码（如 eval、system）。',
+                            '图片内容中检测到 PHP 执行型代码特征。建议立即删除该图片，并排查服务器是否存在本地文件包含漏洞（LFI）。'
                         );
                         $matches[] = $rel_path;
                     }
@@ -343,7 +343,7 @@ class QS_Scanner {
                             $rel_path,
                             'warning',
                             "审计到疑似危险函数调用 ({$type})，可能存在漏洞闭环，请联系开发者核查。",
-                            '由于这是静态代码特征匹配，可能存在误报。请您将此提示截图发给主题或插件作者二次确认；如果插件常年未更新且并非必须使用，建议停用。'
+                            '静态代码特征匹配可能存在误报。建议提交给主题或插件维护者二次确认；长期未维护且非必需的组件可考虑停用。'
                         );
 
                         return [
@@ -437,8 +437,8 @@ class QS_Scanner {
                     'MALICIOUS_JS',
                     $rel_path,
                     'critical',
-                    "前端 JavaScript 核心文件中发现了疑似被篡改的网页挂马跳转脚本！\n{$detail_msg}",
-                    '这会导致您的客户访问网站时被暗中跳转到博彩、色情等恶意网站，或者弹出广告。请立即通过 FTP 覆盖还原该文件，如果无法还原，请暂时更名该 js 禁用它。'
+                    "前端 JavaScript 核心文件中发现疑似被篡改的网页挂马跳转脚本。\n{$detail_msg}",
+                    '访客访问网站时可能被暗中跳转到博彩、色情等恶意网站，或触发异常广告弹窗。建议立即通过 FTP 覆盖还原该文件；无法还原时，可先更名该 JS 文件以阻断加载。'
                 );
 
                 return [
@@ -489,8 +489,8 @@ class QS_Scanner {
                                 'SENSITIVE_FILE_CRITICAL',
                                 $rel_path,
                                 'critical',
-                                "发现高度敏感的文件泄露 ({$filename})，黑客可直接通过浏览器下载！这会导致订单、密码等核心数据被脱裤。",
-                                '请立即通过 FTP 彻底删除此文件！如果是项目必需的运行日志（如 debug.log），请将其移动到网站根目录之外，或者在宝塔/Nginx 配置中严格拦截对 .log 和 .sql 后缀文件的 HTTP 访问。'
+                                "发现高度敏感的文件泄露 ({$filename})，攻击者可能直接通过浏览器下载，导致订单、密码等核心数据泄露。",
+                                '建议立即通过 FTP 删除此文件。若为项目必需的运行日志（如 debug.log），需移动到网站根目录之外，或在宝塔/Nginx 配置中严格拦截对 .log 和 .sql 后缀文件的 HTTP 访问。'
                             );
                         } else {
                             QS_DB::insert_result(
@@ -514,7 +514,7 @@ class QS_Scanner {
                         'GIT_EXPOSURE',
                         $rel_path,
                         'critical',
-                        '发现 .git 版本控制目录，极易导致全站源码与敏感配置泄露！',
+                        '发现 .git 版本控制目录，可能导致全站源码与敏感配置泄露。',
                         '强烈建议立即删除线上的 .git 隐藏目录，或配置 Nginx/Apache 规则彻底屏蔽对 /.git/ 目录的外部访问。'
                     );
                     $results[] = $rel_path;
@@ -559,8 +559,8 @@ class QS_Scanner {
                         'WEBSHELL_FILE',
                         $rel_path,
                         'critical',
-                        'Uploads 上传目录中发现了危险可执行后缀文件，极大概率是绕过上传限制后留下的后门或恶意载荷！',
-                        '请立即核查该文件是否为您主动上传；如果无法确认来源，请优先隔离或删除，并同时检查媒体上传权限和上传拦截规则是否已开启。'
+                        'Uploads 上传目录中发现危险可执行后缀文件，可能是绕过上传限制后留下的后门或恶意载荷。',
+                        '建议立即核查该文件是否为管理员主动上传；无法确认来源时，优先隔离或删除，并检查媒体上传权限和上传拦截规则是否已开启。'
                     );
                     $results[] = $rel_path;
                     return;
@@ -573,7 +573,7 @@ class QS_Scanner {
                         $rel_path,
                         'critical',
                         '文件包含双重后缀 (如 .php.jpg)，可能被用于绕过上传限制造成解析漏洞。',
-                        '此类文件极度可疑，建议立即删除，并通知技术排查是否有攻击者正在尝试上传绕过。'
+                        '该类文件风险较高，建议立即删除，并安排技术排查上传绕过来源。'
                     );
                     $results[] = $rel_path;
                 }
@@ -586,8 +586,8 @@ class QS_Scanner {
                             'WEBSHELL_CONTENT',
                             $rel_path,
                             'critical',
-                            '图片文件内部疑似被注入了木马执行代码 (如 eval, system)！',
-                            '这绝对是恶意文件！攻击者将 PHP 恶意代码嵌入了图片中。请立即删除此图片，并排查服务器是否存在本地文件包含漏洞 (LFI)。'
+                            '图片文件内部疑似被注入木马执行代码（如 eval、system）。',
+                            '图片内容中检测到 PHP 执行型代码特征。建议立即删除该图片，并排查服务器是否存在本地文件包含漏洞（LFI）。'
                         );
                         $results[] = $rel_path;
                     }
@@ -651,7 +651,7 @@ class QS_Scanner {
                                 $rel_path,
                                 'warning',
                                 "审计到疑似危险函数调用 ({$type})，可能存在漏洞闭环，请联系开发者核查。",
-                                '由于这是静态代码特征匹配，可能存在误报。请您将此提示截图发给主题或插件作者二次确认；如果插件常年未更新且并非必须使用，建议停用。'
+                                '静态代码特征匹配可能存在误报。建议提交给主题或插件维护者二次确认；长期未维护且非必需的组件可考虑停用。'
                             );
                             $results[] = $rel_path;
                             break;
@@ -760,7 +760,7 @@ class QS_Scanner {
                 '管理员账号数量',
                 'warning',
                 sprintf( '当前站点存在 %d 个管理员角色账号，已超过预警阈值 %d。管理员账号过多会放大撞库、内部误操作和权限滥用风险。', count( $admin_users ), $privileged_threshold ),
-                '请逐个复核这些管理员是否仍在使用、是否属于当前团队成员；不再需要的管理员请及时降权或删除。你也可以在安全插件设置里调整“管理员数量预警阈值”。'
+                '建议逐个复核这些管理员是否仍在使用、是否属于当前团队成员；不再需要的管理员应及时降权或删除。也可在安全插件设置中调整“管理员数量预警阈值”。'
             );
             $results[] = 'administrator_count';
         }
@@ -801,7 +801,7 @@ class QS_Scanner {
                 '高权限账号：' . $user->user_login,
                 'warning',
                 sprintf( '账号 [%s] 虽然不在 administrator 角色中，但具备高权限能力（如 manage_options / edit_users / install_plugins）。这通常意味着存在自定义高权限角色。', $user->user_login ),
-                '请确认这是你主动设计的自定义角色，而不是插件或恶意代码扩权造成的。建议检查该用户的角色定义、最近权限变更记录和对应插件来源。'
+                '需确认该角色是否为主动设计的自定义高权限角色，而不是插件或恶意代码扩权造成的。建议检查该用户的角色定义、最近权限变更记录和对应插件来源。'
             );
             $results[] = $user->user_login;
         }
@@ -928,7 +928,7 @@ class QS_Scanner {
                     size_format( $autoload_total_bytes ),
                     size_format( $autoload_total_warn )
                 ),
-                '建议结合下方的大体积 autoload option 逐项核查来源；重点检查是否有异常插件把整段 HTML/JS/PHP 代码写入自动加载项。这里只做扫描提示，不会自动修改数据库。'
+                '建议结合下方的大体积 autoload option 逐项核查来源；重点检查是否有异常插件把整段 HTML/JS/PHP 代码写入自动加载项。该项仅做扫描提示，不会自动修改数据库。'
             );
             $results[] = 'autoload_total';
         }
@@ -951,7 +951,7 @@ class QS_Scanner {
                     $option_name,
                     size_format( $size_bytes )
                 ),
-                '请确认这个 option 是否来自你认可的插件/主题；如果它并非业务必需，建议联系开发者进一步核查其来源、更新逻辑和是否存在异常注入。'
+                '建议确认该 option 是否来自认可的插件/主题；若并非业务必需，建议联系开发者进一步核查其来源、更新逻辑和是否存在异常注入。'
             );
             $results[] = 'autoload:' . $option_name;
         }
@@ -977,7 +977,7 @@ class QS_Scanner {
                     $option_name,
                     $preview ? $preview : '（内容不可安全展示）'
                 ),
-                '请核查该 option 由哪个主题、插件或自定义代码写入；若你并不认识它，建议进一步检查最近安装/更新记录、管理员操作日志，以及是否有前台挂马或 SEO 暗链同时出现。'
+                '建议核查该 option 由哪个主题、插件或自定义代码写入；若来源不明，需进一步检查最近安装/更新记录、管理员操作日志，以及是否有前台挂马或 SEO 暗链同时出现。'
             );
             $results[] = 'option:' . $option_name;
         }
@@ -1054,7 +1054,7 @@ class QS_Scanner {
                 'HARDENING_DEBUG',
                 'wp-config.php',
                 'warning',
-                'WP_DEBUG 调试模式开启中！这可能会在网站出错白屏时泄露数据库或绝对路径信息给黑客。',
+                'WP_DEBUG 调试模式开启中，可能在错误页面中泄露数据库信息或绝对路径。',
                 "请编辑根目录下的 wp-config.php，寻找 'define(WP_DEBUG, true);'，将其修改为 false 或者直接删除该行代码以关闭调试。"
             );
             $results[] = 'WP_DEBUG';
@@ -1072,7 +1072,7 @@ class QS_Scanner {
 
         foreach ( $apis as $endpoint => $name ) {
             $url      = site_url( $endpoint );
-            $response = wp_remote_head( $url, [ 'timeout' => 3, 'sslverify' => false ] );
+            $response = wp_remote_head( $url, [ 'timeout' => 3 ] );
             $code     = wp_remote_retrieve_response_code( $response );
 
             if ( 200 === $code ) {
@@ -1081,8 +1081,8 @@ class QS_Scanner {
                     'API_EXPOSE',
                     $endpoint,
                     'warning',
-                    "敏感接口 {$name} 可以被外网公开访问！此行为容易被自动化程序进行扫描嗅探或恶意攻击。",
-                    '建议：如果您的业务不依赖此接口，请在本插件的【主动防护设置】中开启相应的防火墙直接将其阻断。如果您正在使用小程序/App获取该接口数据，请忽略此警告。'
+                    "敏感接口 {$name} 可以被外网公开访问，此行为容易被自动化程序扫描嗅探或恶意利用。",
+                    '建议：若业务不依赖此接口，可在本插件的【主动防护设置】中开启相应的防火墙直接阻断。若小程序/App 需要获取该接口数据，可忽略此警告。'
                 );
                 $results[] = $endpoint;
             }
@@ -1184,8 +1184,8 @@ class QS_Scanner {
                             'MALICIOUS_JS',
                             $rel_path,
                             'critical',
-                            "前端 JavaScript 核心文件中发现了疑似被篡改的网页挂马跳转脚本！\n{$detail_msg}",
-                            '这会导致您的客户访问网站时被暗中跳转到博彩、色情等恶意网站，或者弹出广告。请立即通过 FTP 覆盖还原该文件，如果无法还原，请暂时更名该 js 禁用它。'
+                            "前端 JavaScript 核心文件中发现疑似被篡改的网页挂马跳转脚本。\n{$detail_msg}",
+                            '访客访问网站时可能被暗中跳转到博彩、色情等恶意网站，或触发异常广告弹窗。建议立即通过 FTP 覆盖还原该文件；无法还原时，可先更名该 JS 文件以阻断加载。'
                         );
                         $results[] = $rel_path;
                     }
@@ -1205,7 +1205,7 @@ class QS_Scanner {
         $results  = [];
         $locale   = get_locale();
         $api_url  = "https://api.wordpress.org/core/checksums/1.0/?version={$wp_version}&locale={$locale}";
-        $response = wp_remote_get( $api_url, [ 'timeout' => 15 ] );
+        $response = wp_safe_remote_get( $api_url, [ 'timeout' => 15 ] );
 
         if ( is_wp_error( $response ) ) {
             return $results;
@@ -1245,7 +1245,7 @@ class QS_Scanner {
                     $file,
                     'critical',
                     "核心文件已被篡改：{$file} (本地 MD5 不匹配)",
-                    '警告！该文件与官方标准版本不符，极大概率已被黑客修改并植入了恶意后门代码。请立即从官网下载干净的 WordPress 压缩包，并手动覆盖替换该文件！'
+                    '该文件与官方标准版本不符，存在被篡改或植入恶意代码的风险。建议立即从官网下载干净的 WordPress 压缩包，并手动覆盖替换该文件。'
                 );
                 $results[] = $file;
             }
@@ -1283,7 +1283,7 @@ class QS_Scanner {
                     '文件完整性基线',
                     'warning',
                     '当前还没有可信的文件完整性基线。出于安全考虑，本次扫描不会自动把现有磁盘状态当成基线。',
-                    '请先结合核心校验、恶意代码扫描结果和近期发版情况确认当前站点文件可信，然后在后台手动点击“重建文件基线”；如果你明确接受首次扫描直接建档，也可以到设置里开启“允许首次自动建立文件基线”。'
+                    '建议先结合核心校验、恶意代码扫描结果和近期发版情况确认当前站点文件可信，然后在后台手动点击“重建文件基线”；如明确接受首次扫描直接建档，可在设置中开启“允许首次自动建立文件基线”。'
                 );
                 $results[] = 'baseline_setup_required';
 
@@ -1310,7 +1310,7 @@ class QS_Scanner {
                 '文件完整性基线',
                 'info',
                 sprintf( '已按当前文件状态自动建立首份文件完整性基线，共记录 %d 个文件。后续扫描会基于这份基线报告新增、修改和缺失文件。', $saved ),
-                '只有在你确认当前站点文件就是可信状态时，才建议启用“允许首次自动建立文件基线”。如果后续有正常升级发布，请在后台点击“重建文件基线”。'
+                '仅在当前站点文件已确认可信时，才建议启用“允许首次自动建立文件基线”。后续如有正常升级发布，请在后台点击“重建文件基线”。'
             );
             $results[] = 'baseline_created';
 
@@ -2070,7 +2070,7 @@ class QS_Scanner {
                     'issue_type' => 'UPLOAD_MIME_MISMATCH',
                     'severity'   => 'warning',
                     'detail'     => '该文件扩展名看起来是图片，但实际内容未通过真实图片校验。常见于伪装上传、损坏文件或被替换的恶意载荷。',
-                    'advice'     => '请核查该文件来源；如果它并非你刚上传的正常媒体文件，建议检查上传入口是否被绕过，并确认“严格校验上传文件内容与后缀”已开启。',
+                    'advice'     => '建议核查该文件来源；若并非最近上传的正常媒体文件，需检查上传入口是否被绕过，并确认“严格校验上传文件内容与后缀”已开启。',
                 ];
             }
         }
@@ -2100,7 +2100,7 @@ class QS_Scanner {
                     'issue_type' => 'UPLOAD_ACTIVE_SCRIPT',
                     'severity'   => 'critical',
                     'detail'     => 'Uploads 目录中的前端可执行文件命中了可疑脚本特征。攻击者常把恶意 JS/HTML 投放到 uploads 后再被页面引用执行。',
-                    'advice'     => '请核查该文件是否为业务必需资源；如果你不认识它，建议立刻检查来源页面、最近上传记录和外链引用情况。',
+                    'advice'     => '建议核查该文件是否为业务必需资源；若来源不明，需立刻检查来源页面、最近上传记录和外链引用情况。',
                 ];
             }
         }
@@ -2130,7 +2130,7 @@ class QS_Scanner {
                 'issue_type' => 'CRON_SUSPICIOUS',
                 'severity'   => 'warning',
                 'detail'     => sprintf( '发现可疑的计划任务 Hook [%s]。该任务名称或参数中包含高风险关键词，常见于持久化后门、自恢复脚本或异常远程拉取逻辑。', $hook ),
-                'advice'     => '请全局搜索该 hook 名称，确认它来自哪个主题、插件或自定义代码；如果你并不认识它，请优先检查最近新增插件、MU 插件和可疑代码投放点。',
+                'advice'     => '建议全局搜索该 hook 名称，确认它来自哪个主题、插件或自定义代码；若来源不明，需优先检查最近新增插件、MU 插件和可疑代码投放点。',
             ];
         }
 
@@ -2139,7 +2139,7 @@ class QS_Scanner {
                 'issue_type' => 'CRON_HIGH_FREQUENCY',
                 'severity'   => 'warning',
                 'detail'     => sprintf( '计划任务 [%s] 的执行间隔仅 %d 秒（schedule=%s），频率明显偏高。若来源不明，可能被用于周期性回连、自恢复或高频资源消耗。', $hook, $interval, $schedule ? $schedule : 'custom' ),
-                'advice'     => '请核查该任务是否确为业务必需；如果它是你确认安全的自定义 cron，可把 hook 名加入“Cron 扫描忽略 Hook”列表，避免后续重复告警。',
+                'advice'     => '建议核查该任务是否确为业务必需；若为已确认安全的自定义 cron，可把 hook 名加入“Cron 扫描忽略 Hook”列表，避免后续重复告警。',
             ];
         }
 
@@ -2148,7 +2148,7 @@ class QS_Scanner {
                 'issue_type' => 'CRON_REMOTE_ARGS',
                 'severity'   => 'warning',
                 'detail'     => sprintf( '计划任务 [%s] 的参数中包含远程 URL。若该任务来源不明，可能被用于定时请求远端控制地址或加载外部 payload。', $hook ),
-                'advice'     => '请检查该任务参数里出现的域名、用途和来源插件；如果这并非你主动配置的业务回调任务，建议重点排查。',
+                'advice'     => '建议检查该任务参数里出现的域名、用途和来源插件；若并非主动配置的业务回调任务，需重点排查。',
             ];
         }
 
@@ -2221,8 +2221,8 @@ class QS_Scanner {
             return [
                 'issue_type' => false !== strpos( (string) $label, 'MU 插件' ) ? 'MU_PLUGIN_SUSPICIOUS' : 'DROPIN_SUSPICIOUS',
                 'severity'   => 'critical',
-                'detail'     => sprintf( '%s [%s] 会在每次请求中常驻加载，且文件内容命中了混淆或执行型高危函数特征。若这不是你明确安装的系统组件，极有可能是持久化后门。', $label, $relative_path ),
-                'advice'     => '请立即核查该文件来源、最近修改时间和部署记录；如果并非你主动安装的常驻组件，建议先隔离备份并用干净文件覆盖恢复。',
+                'detail'     => sprintf( '%s [%s] 会在每次请求中常驻加载，且文件内容命中了混淆或执行型高危函数特征。若该文件不是已明确安装的系统组件，极有可能是持久化后门。', $label, $relative_path ),
+                'advice'     => '建议立即核查该文件来源、最近修改时间和部署记录；如果并非管理员主动安装的常驻组件，建议先隔离备份并用干净文件覆盖恢复。',
             ];
         }
 
@@ -2230,7 +2230,7 @@ class QS_Scanner {
             'issue_type' => false !== strpos( (string) $label, 'MU 插件' ) ? 'MU_PLUGIN_PRESENT' : 'DROPIN_PRESENT',
             'severity'   => 'info',
             'detail'     => sprintf( '发现 %s [%s]。这类文件会绕过普通插件停用流程，在每次请求中常驻加载。', $label, $relative_path ),
-            'advice'     => '如果这是你主动安装的缓存、加速、多站点或平台组件，可忽略；如果你不认识它，请检查文件头注释、最近修改时间以及所属插件/运维系统来源。',
+            'advice'     => '若为管理员主动安装的缓存、加速、多站点或平台组件，可忽略；若来源不明，需检查文件头注释、最近修改时间以及所属插件/运维系统来源。',
         ];
     }
 

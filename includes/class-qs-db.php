@@ -8,11 +8,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class QS_DB {
 
-    const SCHEMA_VERSION = '1.4.0';
+    const SCHEMA_VERSION = '1.7.0';
+    const ACTIVE_BAN_COUNT_TRANSIENT = 'qs_active_ban_count';
 
     private static $schema_checked = false;
 
     private static $table_exists_cache = [];
+
+    private static $active_ban_count_cache = null;
+
+    private static $ban_status_cache = [];
 
     private static function get_tables() {
         return [
@@ -22,6 +27,9 @@ class QS_DB {
             'ban_ips'        => 'qilingsecurity_ban_ips',
             'baseline_files' => 'qilingsecurity_baseline_files',
             'phone_location_cache' => 'qilingsecurity_phone_location_cache',
+            'ip_geo_cache'    => 'qilingsecurity_ip_geo_cache',
+            'geo_block_logs'  => 'qilingsecurity_geo_block_logs',
+            'rest_isolation_logs' => 'qilingsecurity_rest_isolation_logs',
             'ip_risk_profiles' => 'qilingsecurity_ip_risk_profiles',
             'ip_risk_events'   => 'qilingsecurity_ip_risk_events',
         ];
@@ -71,6 +79,79 @@ class QS_DB {
         self::$table_exists_cache[ $key ] = self::table_exists_raw( self::get_table_name( $key ) );
 
         return self::$table_exists_cache[ $key ];
+    }
+
+    private static function flush_ban_cache( $ip_address = '' ) {
+        self::$active_ban_count_cache = null;
+
+        if ( '' !== $ip_address ) {
+            unset( self::$ban_status_cache[ (string) $ip_address ] );
+        } else {
+            self::$ban_status_cache = [];
+        }
+
+        delete_transient( self::ACTIVE_BAN_COUNT_TRANSIENT );
+    }
+
+    private static function has_active_bans() {
+        global $wpdb;
+
+        if ( null !== self::$active_ban_count_cache ) {
+            return self::$active_ban_count_cache > 0;
+        }
+
+        $cached = get_transient( self::ACTIVE_BAN_COUNT_TRANSIENT );
+        if ( false !== $cached ) {
+            self::$active_ban_count_cache = max( 0, (int) $cached );
+
+            return self::$active_ban_count_cache > 0;
+        }
+
+        if ( ! self::table_exists( 'ban_ips' ) ) {
+            self::$active_ban_count_cache = 0;
+            set_transient( self::ACTIVE_BAN_COUNT_TRANSIENT, 0, MINUTE_IN_SECONDS );
+
+            return false;
+        }
+
+        $table        = self::get_table_name( 'ban_ips' );
+        $current_time = current_time( 'mysql' );
+        $count        = (int) $wpdb->get_var(
+            $wpdb->prepare( "SELECT COUNT(*) FROM $table WHERE expire_time > %s", $current_time )
+        );
+
+        self::$active_ban_count_cache = max( 0, $count );
+        set_transient( self::ACTIVE_BAN_COUNT_TRANSIENT, self::$active_ban_count_cache, MINUTE_IN_SECONDS );
+
+        return self::$active_ban_count_cache > 0;
+    }
+
+    public static function get_schema_status() {
+        self::maybe_install();
+        self::refresh_table_cache();
+
+        $tables         = [];
+        $missing_tables = [];
+
+        foreach ( array_keys( self::get_tables() ) as $key ) {
+            $exists         = ! empty( self::$table_exists_cache[ $key ] );
+            $tables[ $key ] = $exists;
+
+            if ( ! $exists ) {
+                $missing_tables[] = $key;
+            }
+        }
+
+        $installed_version = (string) get_option( 'qs_db_schema_version', '' );
+        $schema_current    = self::SCHEMA_VERSION === $installed_version && empty( $missing_tables );
+
+        return [
+            'expected_version'  => self::SCHEMA_VERSION,
+            'installed_version' => $installed_version,
+            'schema_current'    => $schema_current,
+            'tables'            => $tables,
+            'missing_tables'    => $missing_tables,
+        ];
     }
 
     public static function maybe_install() {
@@ -188,6 +269,76 @@ class QS_DB {
         ) $charset_collate;";
         dbDelta( $sql_phone_cache );
 
+        $table_ip_geo_cache = self::get_table_name( 'ip_geo_cache' );
+        $sql_ip_geo_cache   = "CREATE TABLE $table_ip_geo_cache (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            ip_address varchar(45) NOT NULL,
+            ip_version tinyint(3) unsigned NOT NULL DEFAULT 4,
+            provider varchar(30) NOT NULL,
+            country_code char(2) NOT NULL DEFAULT '',
+            country_name varchar(100) NOT NULL DEFAULT '',
+            query_status varchar(20) NOT NULL DEFAULT 'unknown',
+            error_message varchar(255) NOT NULL DEFAULT '',
+            hit_count bigint(20) unsigned NOT NULL DEFAULT 1,
+            first_seen datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            last_seen datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            updated_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY  (id),
+            UNIQUE KEY ip_provider (ip_address, provider),
+            KEY country_code (country_code),
+            KEY query_status (query_status),
+            KEY updated_at (updated_at),
+            KEY last_seen (last_seen)
+        ) $charset_collate;";
+        dbDelta( $sql_ip_geo_cache );
+
+        $table_geo_block_logs = self::get_table_name( 'geo_block_logs' );
+        $sql_geo_block_logs   = "CREATE TABLE $table_geo_block_logs (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            event_time datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            ip_address varchar(45) NOT NULL,
+            ip_version tinyint(3) unsigned NOT NULL DEFAULT 4,
+            country_code char(2) NOT NULL DEFAULT '',
+            country_name varchar(100) NOT NULL DEFAULT '',
+            provider varchar(30) NOT NULL DEFAULT '',
+            action varchar(20) NOT NULL DEFAULT '',
+            reason varchar(30) NOT NULL DEFAULT '',
+            request_path varchar(255) NOT NULL DEFAULT '',
+            request_method varchar(10) NOT NULL DEFAULT '',
+            user_agent varchar(255) NOT NULL DEFAULT '',
+            referer varchar(255) NOT NULL DEFAULT '',
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY  (id),
+            KEY event_time (event_time),
+            KEY ip_address (ip_address),
+            KEY country_code (country_code),
+            KEY provider (provider),
+            KEY action (action),
+            KEY reason (reason)
+        ) $charset_collate;";
+        dbDelta( $sql_geo_block_logs );
+
+        $table_rest_isolation_logs = self::get_table_name( 'rest_isolation_logs' );
+        $sql_rest_isolation_logs   = "CREATE TABLE $table_rest_isolation_logs (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            event_time datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            route varchar(255) NOT NULL DEFAULT '',
+            mode varchar(20) NOT NULL DEFAULT 'matched_only',
+            decision varchar(30) NOT NULL DEFAULT 'unknown',
+            matched_rule varchar(255) NOT NULL DEFAULT '',
+            before_count int(11) NOT NULL DEFAULT 0,
+            after_count int(11) NOT NULL DEFAULT 0,
+            matched_plugins_json longtext DEFAULT NULL,
+            final_plugins_json longtext DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP NOT NULL,
+            PRIMARY KEY  (id),
+            KEY event_time (event_time),
+            KEY route (route),
+            KEY mode (mode),
+            KEY decision (decision)
+        ) $charset_collate;";
+        dbDelta( $sql_rest_isolation_logs );
+
         $table_ip_risk_profiles = self::get_table_name( 'ip_risk_profiles' );
         $sql_ip_risk_profiles   = "CREATE TABLE $table_ip_risk_profiles (
             id bigint(20) NOT NULL AUTO_INCREMENT,
@@ -243,6 +394,7 @@ class QS_DB {
         if ( in_array( false, self::$table_exists_cache, true ) ) {
             delete_option( 'qs_db_schema_version' );
         } else {
+            self::migrate_rest_isolation_monitor_option_logs();
             update_option( 'qs_db_schema_version', self::SCHEMA_VERSION );
         }
     }
@@ -397,7 +549,7 @@ class QS_DB {
         $table       = self::get_table_name( 'ban_ips' );
         $expire_time = date( 'Y-m-d H:i:s', current_time( 'timestamp' ) + ( $duration_hours * HOUR_IN_SECONDS ) );
 
-        return $wpdb->replace(
+        $result = $wpdb->replace(
             $table,
             [
                 'ip_address'  => $ip_address,
@@ -406,6 +558,12 @@ class QS_DB {
                 'expire_time' => $expire_time,
             ]
         );
+
+        if ( false !== $result ) {
+            self::flush_ban_cache( $ip_address );
+        }
+
+        return $result;
     }
 
     public static function is_ip_banned( $ip_address ) {
@@ -419,11 +577,23 @@ class QS_DB {
             return false;
         }
 
+        if ( isset( self::$ban_status_cache[ $ip_address ] ) ) {
+            return self::$ban_status_cache[ $ip_address ];
+        }
+
+        if ( ! self::has_active_bans() ) {
+            self::$ban_status_cache[ $ip_address ] = false;
+
+            return false;
+        }
+
         $table        = self::get_table_name( 'ban_ips' );
         $current_time = current_time( 'mysql' );
         $sql          = $wpdb->prepare( "SELECT id FROM $table WHERE ip_address = %s AND expire_time > %s", $ip_address, $current_time );
 
-        return (bool) $wpdb->get_var( $sql );
+        self::$ban_status_cache[ $ip_address ] = (bool) $wpdb->get_var( $sql );
+
+        return self::$ban_status_cache[ $ip_address ];
     }
 
     public static function unban_ip( $ip_address ) {
@@ -435,7 +605,13 @@ class QS_DB {
 
         $table = self::get_table_name( 'ban_ips' );
 
-        return $wpdb->delete( $table, [ 'ip_address' => $ip_address ] );
+        $result = $wpdb->delete( $table, [ 'ip_address' => $ip_address ] );
+
+        if ( false !== $result ) {
+            self::flush_ban_cache( $ip_address );
+        }
+
+        return $result;
     }
 
     public static function get_audit_logs( $limit = 50, $offset = 0 ) {
@@ -487,6 +663,9 @@ class QS_DB {
             'expired_bans'   => 0,
             'baseline_files' => 0,
             'phone_cache'    => 0,
+            'ip_geo_cache'   => 0,
+            'geo_block_logs' => 0,
+            'rest_isolation_logs' => 0,
             'ip_risk_profiles' => 0,
             'ip_risk_events'   => 0,
         ];
@@ -517,6 +696,18 @@ class QS_DB {
 
         if ( self::table_exists( 'phone_location_cache' ) ) {
             $summary['phone_cache'] = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::get_table_name( 'phone_location_cache' ) );
+        }
+
+        if ( self::table_exists( 'ip_geo_cache' ) ) {
+            $summary['ip_geo_cache'] = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::get_table_name( 'ip_geo_cache' ) );
+        }
+
+        if ( self::table_exists( 'geo_block_logs' ) ) {
+            $summary['geo_block_logs'] = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::get_table_name( 'geo_block_logs' ) );
+        }
+
+        if ( self::table_exists( 'rest_isolation_logs' ) ) {
+            $summary['rest_isolation_logs'] = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::get_table_name( 'rest_isolation_logs' ) );
         }
 
         if ( self::table_exists( 'ip_risk_profiles' ) ) {
@@ -761,6 +952,461 @@ class QS_DB {
                 $now
             )
         );
+    }
+
+    public static function get_ip_geo_cache( $ip_address, $provider ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'ip_geo_cache' ) ) {
+            return [];
+        }
+
+        $ip_address = self::normalize_ip_address( $ip_address );
+        $provider   = sanitize_key( str_replace( '-', '_', (string) $provider ) );
+
+        if ( '' === $ip_address || '' === $provider ) {
+            return [];
+        }
+
+        $table = self::get_table_name( 'ip_geo_cache' );
+        $row   = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT id, ip_address, ip_version, provider, country_code, country_name, query_status, error_message, hit_count, first_seen, last_seen, updated_at FROM $table WHERE ip_address = %s AND provider = %s LIMIT 1",
+                $ip_address,
+                $provider
+            ),
+            ARRAY_A
+        );
+
+        if ( ! is_array( $row ) ) {
+            return [];
+        }
+
+        return [
+            'id'            => isset( $row['id'] ) ? (int) $row['id'] : 0,
+            'ip_address'    => isset( $row['ip_address'] ) ? (string) $row['ip_address'] : '',
+            'ip_version'    => isset( $row['ip_version'] ) ? (int) $row['ip_version'] : 4,
+            'provider'      => isset( $row['provider'] ) ? (string) $row['provider'] : '',
+            'country_code'  => isset( $row['country_code'] ) ? strtoupper( (string) $row['country_code'] ) : '',
+            'country_name'  => isset( $row['country_name'] ) ? (string) $row['country_name'] : '',
+            'query_status'  => isset( $row['query_status'] ) ? (string) $row['query_status'] : 'unknown',
+            'error_message' => isset( $row['error_message'] ) ? (string) $row['error_message'] : '',
+            'hit_count'     => isset( $row['hit_count'] ) ? (int) $row['hit_count'] : 0,
+            'first_seen'    => isset( $row['first_seen'] ) ? (string) $row['first_seen'] : '',
+            'last_seen'     => isset( $row['last_seen'] ) ? (string) $row['last_seen'] : '',
+            'updated_at'    => isset( $row['updated_at'] ) ? (string) $row['updated_at'] : '',
+        ];
+    }
+
+    public static function touch_ip_geo_cache( $ip_address, $provider ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'ip_geo_cache' ) ) {
+            return false;
+        }
+
+        $ip_address = self::normalize_ip_address( $ip_address );
+        $provider   = sanitize_key( str_replace( '-', '_', (string) $provider ) );
+
+        if ( '' === $ip_address || '' === $provider ) {
+            return false;
+        }
+
+        $table = self::get_table_name( 'ip_geo_cache' );
+
+        return false !== $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE $table SET hit_count = hit_count + 1, last_seen = %s WHERE ip_address = %s AND provider = %s",
+                current_time( 'mysql' ),
+                $ip_address,
+                $provider
+            )
+        );
+    }
+
+    public static function upsert_ip_geo_cache( $ip_address, $provider, $payload ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'ip_geo_cache' ) ) {
+            return false;
+        }
+
+        $ip_address = self::normalize_ip_address( $ip_address );
+        $provider   = sanitize_key( str_replace( '-', '_', (string) $provider ) );
+
+        if ( '' === $ip_address || '' === $provider ) {
+            return false;
+        }
+
+        $payload       = is_array( $payload ) ? $payload : [];
+        $country_code  = strtoupper( preg_replace( '/[^A-Za-z]/', '', (string) ( isset( $payload['country_code'] ) ? $payload['country_code'] : '' ) ) );
+        $country_code  = 2 === strlen( $country_code ) ? $country_code : '';
+        $country_name  = substr( sanitize_text_field( (string) ( isset( $payload['country_name'] ) ? $payload['country_name'] : '' ) ), 0, 100 );
+        $query_status  = sanitize_key( (string) ( isset( $payload['query_status'] ) ? $payload['query_status'] : 'unknown' ) );
+        $error_message = substr( sanitize_text_field( (string) ( isset( $payload['error_message'] ) ? $payload['error_message'] : '' ) ), 0, 255 );
+        $ip_version    = false !== strpos( $ip_address, ':' ) ? 6 : 4;
+        $now           = current_time( 'mysql' );
+        $table         = self::get_table_name( 'ip_geo_cache' );
+
+        if ( '' === $query_status ) {
+            $query_status = 'unknown';
+        }
+
+        $sql = "
+            INSERT INTO $table
+                (ip_address, ip_version, provider, country_code, country_name, query_status, error_message, hit_count, first_seen, last_seen, updated_at)
+            VALUES
+                (%s, %d, %s, %s, %s, %s, %s, 1, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                ip_version = VALUES(ip_version),
+                country_code = VALUES(country_code),
+                country_name = VALUES(country_name),
+                query_status = VALUES(query_status),
+                error_message = VALUES(error_message),
+                hit_count = hit_count + 1,
+                last_seen = VALUES(last_seen),
+                updated_at = VALUES(updated_at)
+        ";
+
+        return false !== $wpdb->query(
+            $wpdb->prepare(
+                $sql,
+                $ip_address,
+                $ip_version,
+                $provider,
+                $country_code,
+                $country_name,
+                $query_status,
+                $error_message,
+                $now,
+                $now,
+                $now
+            )
+        );
+    }
+
+    public static function cleanup_expired_ip_geo_cache( $days = 180 ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'ip_geo_cache' ) ) {
+            return 0;
+        }
+
+        $days = absint( $days );
+        if ( $days <= 0 ) {
+            return 0;
+        }
+
+        $table   = self::get_table_name( 'ip_geo_cache' );
+        $cutoff  = date( 'Y-m-d H:i:s', current_time( 'timestamp' ) - ( $days * DAY_IN_SECONDS ) );
+        $deleted = $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM $table WHERE last_seen < %s",
+                $cutoff
+            )
+        );
+
+        return false === $deleted ? 0 : (int) $deleted;
+    }
+
+    public static function clear_ip_geo_cache() {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'ip_geo_cache' ) ) {
+            return 0;
+        }
+
+        $table   = self::get_table_name( 'ip_geo_cache' );
+        $deleted = $wpdb->query( "DELETE FROM $table" );
+
+        return false === $deleted ? 0 : (int) $deleted;
+    }
+
+    public static function record_geo_block_log( $payload ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'geo_block_logs' ) ) {
+            return false;
+        }
+
+        $payload        = is_array( $payload ) ? $payload : [];
+        $ip_address     = self::normalize_ip_address( isset( $payload['ip_address'] ) ? $payload['ip_address'] : '' );
+        $country_code   = strtoupper( preg_replace( '/[^A-Za-z]/', '', (string) ( isset( $payload['country_code'] ) ? $payload['country_code'] : '' ) ) );
+        $country_code   = 2 === strlen( $country_code ) ? $country_code : '';
+        $country_name   = substr( sanitize_text_field( (string) ( isset( $payload['country_name'] ) ? $payload['country_name'] : '' ) ), 0, 100 );
+        $provider       = substr( sanitize_key( str_replace( '-', '_', (string) ( isset( $payload['provider'] ) ? $payload['provider'] : '' ) ) ), 0, 30 );
+        $action         = substr( sanitize_key( (string) ( isset( $payload['action'] ) ? $payload['action'] : '' ) ), 0, 20 );
+        $reason         = substr( sanitize_key( (string) ( isset( $payload['reason'] ) ? $payload['reason'] : '' ) ), 0, 30 );
+        $request_path   = substr( sanitize_text_field( (string) ( isset( $payload['request_path'] ) ? $payload['request_path'] : '' ) ), 0, 255 );
+        $request_method = substr( strtoupper( preg_replace( '/[^A-Z]/', '', (string) ( isset( $payload['request_method'] ) ? $payload['request_method'] : '' ) ) ), 0, 10 );
+        $user_agent     = substr( sanitize_text_field( (string) ( isset( $payload['user_agent'] ) ? $payload['user_agent'] : '' ) ), 0, 255 );
+        $referer        = substr( sanitize_text_field( (string) ( isset( $payload['referer'] ) ? $payload['referer'] : '' ) ), 0, 255 );
+        $event_time     = current_time( 'mysql' );
+        $ip_version     = false !== strpos( $ip_address, ':' ) ? 6 : 4;
+
+        if ( '' === $ip_address ) {
+            return false;
+        }
+
+        return false !== $wpdb->insert(
+            self::get_table_name( 'geo_block_logs' ),
+            [
+                'event_time'     => $event_time,
+                'ip_address'     => $ip_address,
+                'ip_version'     => $ip_version,
+                'country_code'   => $country_code,
+                'country_name'   => $country_name,
+                'provider'       => $provider,
+                'action'         => $action,
+                'reason'         => $reason,
+                'request_path'   => $request_path,
+                'request_method' => $request_method,
+                'user_agent'     => $user_agent,
+                'referer'        => $referer,
+                'created_at'     => $event_time,
+            ],
+            [ '%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s' ]
+        );
+    }
+
+    public static function get_geo_block_logs( $limit = 100, $offset = 0 ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'geo_block_logs' ) ) {
+            return [];
+        }
+
+        $limit  = max( 1, min( 200, absint( $limit ) ) );
+        $offset = max( 0, absint( $offset ) );
+        $table  = self::get_table_name( 'geo_block_logs' );
+
+        return $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, event_time, ip_address, ip_version, country_code, country_name, provider, action, reason, request_path, request_method, user_agent, referer, created_at FROM $table ORDER BY event_time DESC, id DESC LIMIT %d OFFSET %d",
+                $limit,
+                $offset
+            )
+        );
+    }
+
+    public static function get_geo_block_log_count() {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'geo_block_logs' ) ) {
+            return 0;
+        }
+
+        return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::get_table_name( 'geo_block_logs' ) );
+    }
+
+    public static function cleanup_expired_geo_block_logs( $days = 180 ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'geo_block_logs' ) ) {
+            return 0;
+        }
+
+        $days = absint( $days );
+        if ( $days <= 0 ) {
+            return 0;
+        }
+
+        $table   = self::get_table_name( 'geo_block_logs' );
+        $cutoff  = date( 'Y-m-d H:i:s', current_time( 'timestamp' ) - ( $days * DAY_IN_SECONDS ) );
+        $deleted = $wpdb->query(
+            $wpdb->prepare(
+                "DELETE FROM $table WHERE event_time < %s",
+                $cutoff
+            )
+        );
+
+        return false === $deleted ? 0 : (int) $deleted;
+    }
+
+    public static function clear_geo_block_logs() {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'geo_block_logs' ) ) {
+            return 0;
+        }
+
+        $table   = self::get_table_name( 'geo_block_logs' );
+        $deleted = $wpdb->query( "DELETE FROM $table" );
+
+        return false === $deleted ? 0 : (int) $deleted;
+    }
+
+    public static function record_rest_isolation_log( $payload ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'rest_isolation_logs' ) ) {
+            return false;
+        }
+
+        $payload         = is_array( $payload ) ? $payload : [];
+        $event_time      = ! empty( $payload['time'] ) ? sanitize_text_field( (string) $payload['time'] ) : current_time( 'mysql' );
+        $route           = self::normalize_rest_isolation_log_route( isset( $payload['route'] ) ? $payload['route'] : '' );
+        $mode            = sanitize_key( (string) ( isset( $payload['mode'] ) ? $payload['mode'] : 'matched_only' ) );
+        $decision        = substr( sanitize_key( (string) ( isset( $payload['decision'] ) ? $payload['decision'] : 'unknown' ) ), 0, 30 );
+        $matched_rule    = self::normalize_rest_isolation_log_route( isset( $payload['matched_rule'] ) ? $payload['matched_rule'] : '' );
+        $before_count    = isset( $payload['before_count'] ) ? max( 0, (int) $payload['before_count'] ) : 0;
+        $after_count     = isset( $payload['after_count'] ) ? max( 0, (int) $payload['after_count'] ) : 0;
+        $matched_plugins = self::normalize_rest_isolation_plugin_list( isset( $payload['matched_plugins'] ) ? $payload['matched_plugins'] : [] );
+        $final_plugins   = self::normalize_rest_isolation_plugin_list( isset( $payload['final_plugins'] ) ? $payload['final_plugins'] : [] );
+
+        if ( ! in_array( $mode, [ 'matched_only', 'all_rest' ], true ) ) {
+            $mode = 'matched_only';
+        }
+
+        if ( '' === $decision ) {
+            $decision = 'unknown';
+        }
+
+        if ( '' === $route ) {
+            $route = '/';
+        }
+
+        $matched_plugins_json = wp_json_encode( array_slice( $matched_plugins, 0, 30 ) );
+        $final_plugins_json   = wp_json_encode( array_slice( $final_plugins, 0, 30 ) );
+        $matched_plugins_json = is_string( $matched_plugins_json ) ? $matched_plugins_json : '[]';
+        $final_plugins_json   = is_string( $final_plugins_json ) ? $final_plugins_json : '[]';
+
+        return false !== $wpdb->insert(
+            self::get_table_name( 'rest_isolation_logs' ),
+            [
+                'event_time'           => $event_time,
+                'route'                => substr( $route, 0, 255 ),
+                'mode'                 => substr( $mode, 0, 20 ),
+                'decision'             => $decision,
+                'matched_rule'         => substr( $matched_rule, 0, 255 ),
+                'before_count'         => $before_count,
+                'after_count'          => $after_count,
+                'matched_plugins_json' => $matched_plugins_json,
+                'final_plugins_json'   => $final_plugins_json,
+                'created_at'           => current_time( 'mysql' ),
+            ],
+            [ '%s', '%s', '%s', '%s', '%s', '%d', '%d', '%s', '%s', '%s' ]
+        );
+    }
+
+    public static function get_rest_isolation_logs( $limit = 100, $offset = 0 ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'rest_isolation_logs' ) ) {
+            return [];
+        }
+
+        $limit  = max( 1, min( 500, absint( $limit ) ) );
+        $offset = max( 0, absint( $offset ) );
+        $table  = self::get_table_name( 'rest_isolation_logs' );
+        $rows   = $wpdb->get_results(
+            $wpdb->prepare(
+                "SELECT id, event_time, route, mode, decision, matched_rule, before_count, after_count, matched_plugins_json, final_plugins_json
+                FROM $table
+                ORDER BY id DESC
+                LIMIT %d OFFSET %d",
+                $limit,
+                $offset
+            ),
+            ARRAY_A
+        );
+
+        $logs = [];
+
+        foreach ( (array) $rows as $row ) {
+            $logs[] = [
+                'id'              => isset( $row['id'] ) ? (int) $row['id'] : 0,
+                'time'            => isset( $row['event_time'] ) ? sanitize_text_field( (string) $row['event_time'] ) : '',
+                'route'           => self::normalize_rest_isolation_log_route( isset( $row['route'] ) ? $row['route'] : '' ),
+                'mode'            => isset( $row['mode'] ) ? sanitize_key( (string) $row['mode'] ) : 'matched_only',
+                'decision'        => isset( $row['decision'] ) ? sanitize_key( (string) $row['decision'] ) : 'unknown',
+                'matched_rule'    => self::normalize_rest_isolation_log_route( isset( $row['matched_rule'] ) ? $row['matched_rule'] : '' ),
+                'before_count'    => isset( $row['before_count'] ) ? max( 0, (int) $row['before_count'] ) : 0,
+                'after_count'     => isset( $row['after_count'] ) ? max( 0, (int) $row['after_count'] ) : 0,
+                'matched_plugins' => self::decode_rest_isolation_plugin_json( isset( $row['matched_plugins_json'] ) ? $row['matched_plugins_json'] : '' ),
+                'final_plugins'   => self::decode_rest_isolation_plugin_json( isset( $row['final_plugins_json'] ) ? $row['final_plugins_json'] : '' ),
+            ];
+        }
+
+        return $logs;
+    }
+
+    public static function get_rest_isolation_log_count() {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'rest_isolation_logs' ) ) {
+            return 0;
+        }
+
+        return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::get_table_name( 'rest_isolation_logs' ) );
+    }
+
+    public static function prune_rest_isolation_logs( $max_entries = 500 ) {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'rest_isolation_logs' ) ) {
+            return 0;
+        }
+
+        $max_entries = max( 20, min( 500, absint( $max_entries ) ) );
+        $table       = self::get_table_name( 'rest_isolation_logs' );
+        $offset      = max( 0, $max_entries - 1 );
+        $cutoff_id   = (int) $wpdb->get_var(
+            $wpdb->prepare( "SELECT id FROM $table ORDER BY id DESC LIMIT 1 OFFSET %d", $offset )
+        );
+
+        if ( $cutoff_id <= 0 ) {
+            return 0;
+        }
+
+        $deleted = $wpdb->query(
+            $wpdb->prepare( "DELETE FROM $table WHERE id < %d", $cutoff_id )
+        );
+
+        return false === $deleted ? 0 : (int) $deleted;
+    }
+
+    public static function clear_rest_isolation_logs() {
+        global $wpdb;
+
+        if ( ! self::table_exists( 'rest_isolation_logs' ) ) {
+            return 0;
+        }
+
+        $table   = self::get_table_name( 'rest_isolation_logs' );
+        $deleted = $wpdb->query( "DELETE FROM $table" );
+
+        return false === $deleted ? 0 : (int) $deleted;
+    }
+
+    private static function migrate_rest_isolation_monitor_option_logs() {
+        $option_key = 'qs_rest_plugin_isolation_monitor_logs';
+        $logs       = get_option( $option_key, [] );
+
+        if ( empty( $logs ) || ! is_array( $logs ) ) {
+            delete_option( $option_key );
+            return 0;
+        }
+
+        if ( empty( self::$table_exists_cache['rest_isolation_logs'] ) ) {
+            return 0;
+        }
+
+        $migrated = 0;
+
+        foreach ( array_reverse( $logs ) as $log ) {
+            if ( ! is_array( $log ) ) {
+                continue;
+            }
+
+            if ( self::record_rest_isolation_log( $log ) ) {
+                $migrated++;
+            }
+        }
+
+        delete_option( $option_key );
+
+        return $migrated;
     }
 
     public static function get_ip_risk_profile( $ip_address ) {
@@ -1522,6 +2168,71 @@ class QS_DB {
         return $ip_address ? $ip_address : '';
     }
 
+    private static function normalize_rest_isolation_log_route( $value ) {
+        $value = trim( (string) $value );
+
+        if ( '' === $value ) {
+            return '';
+        }
+
+        $value = str_replace( '\\', '/', $value );
+        $value = preg_replace( '#^https?://[^/]+#i', '', $value );
+        $value = preg_replace( '/\s+/', '', $value );
+
+        if ( false !== strpos( $value, '?' ) ) {
+            $value = (string) strtok( $value, '?' );
+        }
+
+        if ( 0 === strpos( $value, '/wp-json' ) ) {
+            $value = substr( $value, 8 );
+        } elseif ( 0 === strpos( $value, 'wp-json/' ) ) {
+            $value = substr( $value, 7 );
+        }
+
+        $value = rtrim( $value, '*' );
+        $value = preg_replace( '#/+#', '/', $value );
+
+        if ( '' === $value || '/' === $value ) {
+            return '/';
+        }
+
+        if ( '/' !== substr( $value, 0, 1 ) ) {
+            $value = '/' . $value;
+        }
+
+        return $value;
+    }
+
+    private static function normalize_rest_isolation_plugin_list( $value ) {
+        if ( is_array( $value ) ) {
+            $value = implode( "\n", array_map( 'strval', $value ) );
+        }
+
+        $items = preg_split( '/[\r\n,]+/', (string) $value );
+        $items = array_map( 'trim', (array) $items );
+        $items = array_map(
+            static function( $item ) {
+                $item = trim( str_replace( '\\', '/', (string) $item ) );
+                $item = ltrim( $item, '/' );
+
+                if ( '' === $item || false !== strpos( $item, '..' ) ) {
+                    return '';
+                }
+
+                return 1 === preg_match( '#^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*\.php$#', $item ) ? $item : '';
+            },
+            $items
+        );
+
+        return array_slice( array_values( array_unique( array_filter( $items ) ) ), 0, 30 );
+    }
+
+    private static function decode_rest_isolation_plugin_json( $value ) {
+        $decoded = is_string( $value ) && '' !== $value ? json_decode( $value, true ) : [];
+
+        return self::normalize_rest_isolation_plugin_list( is_array( $decoded ) ? $decoded : [] );
+    }
+
     public static function get_security_analytics( $days = 7 ) {
         global $wpdb;
 
@@ -1710,6 +2421,9 @@ class QS_DB {
             'bans'    => 0,
             'ip_risk_events'   => 0,
             'ip_risk_profiles' => 0,
+            'ip_geo_cache'     => 0,
+            'geo_block_logs'   => 0,
+            'rest_isolation_logs' => 0,
         ];
 
         if ( self::table_exists( 'scans' ) && self::table_exists( 'results' ) ) {
@@ -1748,6 +2462,7 @@ class QS_DB {
             $deleted      = $wpdb->query( $query );
 
             $summary['bans'] = false === $deleted ? 0 : (int) $deleted;
+            self::flush_ban_cache();
         }
 
         $ip_risk_retention_days = isset( $settings['ip_risk_retention_days'] ) ? absint( $settings['ip_risk_retention_days'] ) : 0;
@@ -1770,6 +2485,12 @@ class QS_DB {
             $summary['ip_risk_profiles'] = false === $deleted ? 0 : (int) $deleted;
         }
 
+        $geo_block_log_retention_days = isset( $settings['geo_block_log_retention_days'] ) ? absint( $settings['geo_block_log_retention_days'] ) : 180;
+        $summary['geo_block_logs']    = self::cleanup_expired_geo_block_logs( $geo_block_log_retention_days );
+        $summary['ip_geo_cache'] = self::cleanup_expired_ip_geo_cache( 180 );
+        $rest_isolation_max_entries = isset( $settings['rest_plugin_isolation_monitor_max_entries'] ) ? absint( $settings['rest_plugin_isolation_monitor_max_entries'] ) : 100;
+        $summary['rest_isolation_logs'] = self::prune_rest_isolation_logs( $rest_isolation_max_entries );
+
         return $summary;
     }
 
@@ -1783,6 +2504,9 @@ class QS_DB {
             'bans'     => 0,
             'baseline' => 0,
             'phone_cache' => 0,
+            'ip_geo_cache' => 0,
+            'geo_block_logs' => 0,
+            'rest_isolation_logs' => 0,
             'ip_risk_profiles' => 0,
             'ip_risk_events'   => 0,
         ];
@@ -1809,6 +2533,7 @@ class QS_DB {
             $table           = self::get_table_name( 'ban_ips' );
             $deleted         = $wpdb->query( "DELETE FROM $table" );
             $summary['bans'] = false === $deleted ? 0 : (int) $deleted;
+            self::flush_ban_cache();
         }
 
         if ( self::table_exists( 'baseline_files' ) ) {
@@ -1821,6 +2546,24 @@ class QS_DB {
             $table                  = self::get_table_name( 'phone_location_cache' );
             $deleted                = $wpdb->query( "DELETE FROM $table" );
             $summary['phone_cache'] = false === $deleted ? 0 : (int) $deleted;
+        }
+
+        if ( self::table_exists( 'ip_geo_cache' ) ) {
+            $table                   = self::get_table_name( 'ip_geo_cache' );
+            $deleted                 = $wpdb->query( "DELETE FROM $table" );
+            $summary['ip_geo_cache'] = false === $deleted ? 0 : (int) $deleted;
+        }
+
+        if ( self::table_exists( 'geo_block_logs' ) ) {
+            $table                     = self::get_table_name( 'geo_block_logs' );
+            $deleted                   = $wpdb->query( "DELETE FROM $table" );
+            $summary['geo_block_logs'] = false === $deleted ? 0 : (int) $deleted;
+        }
+
+        if ( self::table_exists( 'rest_isolation_logs' ) ) {
+            $table                          = self::get_table_name( 'rest_isolation_logs' );
+            $deleted                        = $wpdb->query( "DELETE FROM $table" );
+            $summary['rest_isolation_logs'] = false === $deleted ? 0 : (int) $deleted;
         }
 
         if ( self::table_exists( 'ip_risk_profiles' ) ) {
@@ -1845,10 +2588,13 @@ class QS_DB {
             $wpdb->query( 'DROP TABLE IF EXISTS ' . $wpdb->prefix . $table_name );
         }
 
+        self::flush_ban_cache();
+
         delete_option( 'qs_db_schema_version' );
         delete_option( 'qs_protection_settings' );
         delete_option( 'qs_rule_package_active' );
         delete_option( 'qs_rule_package_previous' );
+        delete_option( 'qs_rest_plugin_isolation_monitor_logs' );
     }
 
     private static function delete_results_by_scan_ids( $scan_ids ) {

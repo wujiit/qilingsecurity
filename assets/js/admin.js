@@ -13,6 +13,10 @@ jQuery(document).ready(function ($) {
     const defaultProxyHeaders = Array.isArray(payload.defaultProxyHeaders) ? payload.defaultProxyHeaders : [];
     const ajaxurl = typeof payload.ajaxurl === 'string' ? payload.ajaxurl : '';
     const nonce = typeof payload.nonce === 'string' ? payload.nonce : '';
+    const lazyTabs = Array.isArray(payload.lazyTabs)
+        ? payload.lazyTabs.map(item => String(item || '').trim()).filter(Boolean)
+        : [];
+    const lazyTabSet = new Set(lazyTabs);
     const resultStatusMeta = {
         open: { label: '待处理', className: 'warning' },
         resolved: { label: '已处理', className: 'success' },
@@ -31,11 +35,111 @@ jQuery(document).ready(function ($) {
     } catch (err) {
         console.error('Qiling Security domain replace init failed:', err);
     }
+    try {
+        initNginxRuleCopy();
+    } catch (err) {
+        console.error('Qiling Security nginx copy init failed:', err);
+    }
     activateInitialTab();
 
     $startBtn.on('click', function () {
         startFullScan();
     });
+
+    function getTabKeyFromHash(tabHash) {
+        const normalized = String(tabHash || '').trim();
+        return normalized.indexOf('#tab-') === 0 ? normalized.replace(/^#tab-/, '') : '';
+    }
+
+    function buildLazyTabPlaceholder(label, state, message) {
+        const normalizedState = ['idle', 'loading', 'error'].includes(String(state || ''))
+            ? String(state || '')
+            : 'idle';
+        const safeLabel = escapeHtml(label || '当前页签');
+        let safeMessage = String(message || '').trim();
+
+        if (!safeMessage) {
+            if (normalizedState === 'loading') {
+                safeMessage = `正在加载「${label || '当前页签'}」面板内容...`;
+            } else if (normalizedState === 'error') {
+                safeMessage = '加载失败，请点击下方按钮重试。';
+            } else {
+                safeMessage = '点击此页签后再按需加载内容，减少后台首屏压力。';
+            }
+        }
+
+        return `<div class="qs-tab-lazy-state is-${normalizedState}">
+            <div class="qs-tab-lazy-card${normalizedState === 'error' ? ' is-error' : ''}">
+                <span class="dashicons ${normalizedState === 'error' ? 'dashicons-warning' : 'dashicons-update'} qs-tab-lazy-icon${normalizedState === 'loading' ? ' is-loading' : ''}"></span>
+                <strong>${safeLabel}</strong>
+                <p>${escapeHtml(safeMessage)}</p>
+                ${normalizedState === 'error' ? '<button type="button" class="button button-secondary qs-tab-retry-load">重新加载此页签</button>' : ''}
+            </div>
+        </div>`;
+    }
+
+    function initializeLazyTabEnhancements(tabKey) {
+        if (tabKey === 'protection') {
+            initProxyPresetHelper();
+        }
+
+        if (tabKey === 'domain') {
+            initDomainReplace();
+        }
+
+        if (tabKey === 'nginx') {
+            initNginxRuleCopy();
+        }
+    }
+
+    function maybeLoadTabContent(tabHash, $content) {
+        const tabKey = getTabKeyFromHash(tabHash);
+
+        if (!$content || !$content.length || !tabKey || !lazyTabSet.has(tabKey)) {
+            return;
+        }
+
+        if (String($content.attr('data-tab-loaded') || '') === '1' || String($content.attr('data-tab-loading') || '') === '1') {
+            return;
+        }
+
+        const tabLabel = String($content.attr('data-tab-label') || $content.data('tabLabel') || tabKey);
+        $content
+            .attr('data-tab-loading', '1')
+            .attr('aria-busy', 'true')
+            .html(buildLazyTabPlaceholder(tabLabel, 'loading'));
+
+        $.post(ajaxurl, {
+            action: 'qs_load_admin_tab',
+            nonce: nonce,
+            tab: tabKey
+        }, function (response) {
+            if (!response || !response.success || !response.data || typeof response.data.html !== 'string') {
+                const errorText = extractAjaxError(response, `加载「${tabLabel}」失败，请稍后重试。`);
+                $content
+                    .attr('data-tab-loading', '0')
+                    .removeAttr('aria-busy')
+                    .html(buildLazyTabPlaceholder(tabLabel, 'error', errorText));
+                return;
+            }
+
+            $content
+                .attr('data-tab-loaded', '1')
+                .attr('data-tab-loading', '0')
+                .removeAttr('aria-busy')
+                .html(response.data.html);
+
+            initializeLazyTabEnhancements(tabKey);
+        }).fail(function (xhr) {
+            const errorText = xhr && xhr.statusText
+                ? `网络错误：${xhr.statusText}`
+                : `加载「${tabLabel}」失败，请稍后重试。`;
+            $content
+                .attr('data-tab-loading', '0')
+                .removeAttr('aria-busy')
+                .html(buildLazyTabPlaceholder(tabLabel, 'error', errorText));
+        });
+    }
 
     function startFullScan() {
         if ($startBtn.prop('disabled')) {
@@ -120,7 +224,7 @@ jQuery(document).ready(function ($) {
 
             if (nextStats.issues > 0) {
                 const suffix = nextStats.truncated ? ' 已达到扫描上限，结果可能并非全量。' : '';
-                appendResultRow('warning', step.id, `发现在 ${step.name} 中存在 ${nextStats.issues} 个风险项！刷新后可查看完整报告。${suffix}`, '查看报告');
+                appendResultRow('warning', step.id, `发现在 ${step.name} 中存在 ${nextStats.issues} 个风险项。刷新后可查看完整报告。${suffix}`, '查看报告');
             } else if (nextStats.truncated) {
                 appendResultRow('info', step.id, `${step.name} 已达到扫描上限，当前未发现异常，但本轮只完成了部分扫描。建议调大扫描上限后重试。`, '部分完成');
             } else {
@@ -142,10 +246,10 @@ jQuery(document).ready(function ($) {
     function finishScan() {
         const totalSteps = scanSteps.length;
 
-        $currentTask.text('体检完成！');
+        $currentTask.text('体检完成');
         $progressFill.css({ width: '100%', background: '#10b981' });
         $progressText.text(`${totalSteps} / ${totalSteps} 阶段`);
-        $startBtn.prop('disabled', false).text('🚀 重新体检');
+        $startBtn.prop('disabled', false).text('重新体检');
 
         $.post(ajaxurl, {
             action: 'qs_run_scan',
@@ -161,9 +265,9 @@ jQuery(document).ready(function ($) {
     }
 
     function handleError(msg) {
-        $currentTask.text('体检中断或发生错误！');
+        $currentTask.text('体检中断或发生错误');
         $progressFill.css('background', '#ef4444');
-        $startBtn.prop('disabled', false).text('🚀 重新体检');
+        $startBtn.prop('disabled', false).text('重新体检');
         appendResultRow('critical', 'ERROR', msg, '查看日志');
     }
 
@@ -217,7 +321,7 @@ jQuery(document).ready(function ($) {
         `);
     }
 
-    $('.nav-tab').on('click', function (e) {
+    $('.qs-admin-tab').on('click', function (e) {
         e.preventDefault();
         activateTab(String($(this).attr('href') || '#tab-scanner'), true);
     });
@@ -238,7 +342,7 @@ jQuery(document).ready(function ($) {
         loadIpRiskDetail(ipAddress, $btn);
     });
 
-    $('#qs-iprisk-clear-profiles, #qs-iprisk-clear-events, #qs-iprisk-clear-all').on('click', function () {
+    $(document).on('click', '#qs-iprisk-clear-profiles, #qs-iprisk-clear-events, #qs-iprisk-clear-all', function () {
         const $btn = $(this);
         const target = String($btn.attr('id') || '')
             .replace('qs-iprisk-clear-', '')
@@ -290,7 +394,87 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-iprisk-delete-current').on('click', function () {
+    function initNginxRuleCopy() {
+        const $copyBtn = $('#qs-copy-nginx-rules');
+        const $code = $('#qs-nginx-code');
+        const $message = $('#qs-copy-nginx-message');
+
+        if (!$copyBtn.length || !$code.length) {
+            return;
+        }
+
+        function setCopyMessage(message, isError) {
+            if (!$message.length) {
+                return;
+            }
+
+            $message.text(message || '');
+            $message.toggleClass('is-error', !!isError);
+
+            if (message) {
+                window.clearTimeout($message.data('clearTimer'));
+                const timer = window.setTimeout(function () {
+                    $message.text('').removeClass('is-error');
+                }, 2400);
+                $message.data('clearTimer', timer);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', 'readonly');
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            textarea.style.pointerEvents = 'none';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+
+            let copied = false;
+            try {
+                copied = document.execCommand('copy');
+            } catch (err) {
+                copied = false;
+            }
+
+            document.body.removeChild(textarea);
+            return copied;
+        }
+
+        async function copyRules(text) {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            }
+
+            return fallbackCopy(text);
+        }
+
+        $copyBtn.off('click.qsNginxCopy').on('click.qsNginxCopy', async function () {
+            const ruleText = $code.text().replace(/\n{3,}/g, '\n\n').trim();
+            if (!ruleText) {
+                setCopyMessage('没有可复制的规则内容。', true);
+                return;
+            }
+
+            $copyBtn.prop('disabled', true);
+
+            try {
+                const copied = await copyRules(ruleText);
+                if (!copied) {
+                    throw new Error('copy_failed');
+                }
+                setCopyMessage('规则已复制到剪贴板。', false);
+            } catch (err) {
+                setCopyMessage('复制失败，请手动选择代码后复制。', true);
+            } finally {
+                $copyBtn.prop('disabled', false);
+            }
+        });
+    }
+
+    $(document).on('click', '#qs-iprisk-delete-current', function () {
         const $btn = $(this);
         const ipAddress = String($btn.data('ipAddress') || '').trim();
         if (!ipAddress) {
@@ -324,13 +508,34 @@ jQuery(document).ready(function ($) {
 
     bindProtectionSaveButton('#qs-save-protection', '.qs-save-spinner', '#qs-save-message');
     bindProtectionSaveButton('#qs-save-security-optimize', '.qs-security-optimize-save-spinner', '#qs-save-security-optimize-message');
+    bindProtectionSaveButton('#qs-save-redis-cache', '.qs-redis-cache-save-spinner', '#qs-save-redis-cache-message');
+    bindProtectionSaveButton('#qs-save-alert-center', '.qs-alert-center-save-spinner', '#qs-save-alert-center-message');
+    bindProtectionSaveButton('#qs-save-geo-block', '.qs-geo-block-save-spinner', '#qs-save-geo-block-message');
+    bindProtectionSaveButton('#qs-save-ip-risk', '.qs-ip-risk-save-spinner', '#qs-save-ip-risk-message');
     bindProtectionSaveButton('#qs-save-route-isolation', '.qs-route-isolation-save-spinner', '#qs-save-route-isolation-message');
+    bindAlertTestAction('#qs-send-alert-test', 'qs_send_security_alert_test');
+    bindHealthCheckAction('#qs-run-health-check', 'qs_run_health_check', {
+        successReloadDelay: 800,
+        errorReloadDelay: 1000
+    });
+    bindRedisPanelAction('#qs-run-redis-cache-probe', 'qs_run_redis_cache_probe', {
+        successMessage: 'Redis 缓存自检通过。',
+        successReloadDelay: 900,
+        errorReloadDelay: 1100
+    });
+    bindRedisPanelAction('#qs-sync-redis-dropin', 'qs_sync_redis_dropin', {
+        successMessage: 'Redis Drop-in 已重新同步。',
+        successReloadDelay: 800,
+        errorReloadDelay: 1000
+    });
 
     function bindProtectionSaveButton(buttonSelector, spinnerSelector, messageSelector) {
-        $(buttonSelector).on('click', function () {
+        $(document).on('click', buttonSelector, function () {
             const $btn = $(this);
             const $spinner = $(spinnerSelector);
             const $msg = $(messageSelector);
+            const $scope = $btn.closest('.qs-panel');
+            const fieldKeys = parseSettingFieldKeys($btn.attr('data-setting-fields') || $scope.attr('data-setting-fields'));
 
             if (!$btn.length) {
                 return;
@@ -343,13 +548,20 @@ jQuery(document).ready(function ($) {
             $.post(ajaxurl, {
                 action: 'qs_save_protection',
                 nonce: nonce,
-                settings: collectSettingsPayload()
+                settings: collectSettingsPayload($scope, fieldKeys)
             }, function (response) {
                 $btn.prop('disabled', false);
                 $spinner.removeClass('is-active');
 
                 if (response.success) {
-                    $msg.css('color', '#10b981').text(response.data.msg);
+                    const tone = response.data && response.data.tone ? String(response.data.tone) : 'success';
+                    const color = tone === 'warning' ? '#f59e0b' : '#10b981';
+                    $msg.css('color', color).text(response.data.msg);
+
+                    if ($btn.is('#qs-save-redis-cache')) {
+                        reloadCurrentTab(700);
+                    }
+
                     setTimeout(function () {
                         $msg.text('');
                     }, 3000);
@@ -364,7 +576,199 @@ jQuery(document).ready(function ($) {
         });
     }
 
-    $('#qs-clear-route-isolation-logs').on('click', function () {
+    function bindRedisPanelAction(buttonSelector, actionName, options) {
+        $(document).on('click', buttonSelector, function () {
+            const $btn = $(this);
+            const $spinner = $('.qs-redis-cache-action-spinner');
+            const $msg = $('#qs-redis-cache-action-message');
+            const settings = options && typeof options === 'object' ? options : {};
+
+            if (!$btn.length || $btn.prop('disabled')) {
+                return;
+            }
+
+            $btn.prop('disabled', true);
+            $spinner.addClass('is-active');
+            setPanelActionMessage($msg, '', 'info');
+
+            $.post(ajaxurl, {
+                action: actionName,
+                nonce: nonce
+            }, function (response) {
+                $btn.prop('disabled', false);
+                $spinner.removeClass('is-active');
+
+                if (!response || !response.success) {
+                    const errorText = extractAjaxError(response, '操作失败，请稍后再试');
+                    setPanelActionMessage($msg, errorText, 'error');
+                    notifyRedisAction(errorText, 'error');
+
+                    if (settings.errorReloadDelay) {
+                        reloadCurrentTab(settings.errorReloadDelay);
+                    }
+                    return;
+                }
+
+                const message = response.data && response.data.msg
+                    ? String(response.data.msg)
+                    : String(settings.successMessage || '操作完成。');
+
+                setPanelActionMessage($msg, message, 'success');
+                notifyRedisAction(message, 'success');
+
+                if (settings.successReloadDelay) {
+                    reloadCurrentTab(settings.successReloadDelay);
+                }
+            }).fail(function () {
+                $btn.prop('disabled', false);
+                $spinner.removeClass('is-active');
+                setPanelActionMessage($msg, '网络错误，请稍后再试', 'error');
+                notifyRedisAction('网络错误，请稍后再试', 'error');
+
+                if (settings.errorReloadDelay) {
+                    reloadCurrentTab(settings.errorReloadDelay);
+                }
+            });
+        });
+    }
+
+    function bindHealthCheckAction(buttonSelector, actionName, options) {
+        $(document).on('click', buttonSelector, function () {
+            const $btn = $(this);
+            const $spinner = $('.qs-health-check-spinner');
+            const $msg = $('#qs-health-check-message');
+            const settings = options && typeof options === 'object' ? options : {};
+
+            if (!$btn.length || $btn.prop('disabled')) {
+                return;
+            }
+
+            $btn.prop('disabled', true);
+            $spinner.addClass('is-active');
+            setPanelActionMessage($msg, '', 'info');
+
+            $.post(ajaxurl, {
+                action: actionName,
+                nonce: nonce
+            }, function (response) {
+                $btn.prop('disabled', false);
+                $spinner.removeClass('is-active');
+
+                if (!response || !response.success) {
+                    const errorText = extractAjaxError(response, '插件自检失败，请稍后再试');
+                    setPanelActionMessage($msg, errorText, 'error');
+
+                    if (settings.errorReloadDelay) {
+                        reloadCurrentTab(settings.errorReloadDelay);
+                    }
+                    return;
+                }
+
+                const message = response.data && response.data.msg
+                    ? String(response.data.msg)
+                    : '插件自检已完成。';
+
+                setPanelActionMessage($msg, message, 'success');
+
+                if (settings.successReloadDelay) {
+                    reloadCurrentTab(settings.successReloadDelay);
+                }
+            }).fail(function () {
+                $btn.prop('disabled', false);
+                $spinner.removeClass('is-active');
+                setPanelActionMessage($msg, '网络错误，请稍后再试', 'error');
+
+                if (settings.errorReloadDelay) {
+                    reloadCurrentTab(settings.errorReloadDelay);
+                }
+            });
+        });
+    }
+
+    function bindAlertTestAction(buttonSelector, actionName) {
+        $(document).on('click', buttonSelector, function () {
+            const $btn = $(this);
+            const $spinner = $('.qs-alert-test-spinner');
+            const $msg = $('#qs-alert-test-message');
+
+            if (!$btn.length || $btn.prop('disabled')) {
+                return;
+            }
+
+            $btn.prop('disabled', true);
+            $spinner.addClass('is-active');
+            setPanelActionMessage($msg, '', 'info');
+
+            $.post(ajaxurl, {
+                action: actionName,
+                nonce: nonce
+            }, function (response) {
+                $btn.prop('disabled', false);
+                $spinner.removeClass('is-active');
+
+                if (!response || !response.success) {
+                    const errorText = extractAjaxError(response, '测试告警发送失败，请稍后再试');
+                    setPanelActionMessage($msg, errorText, 'error');
+                    return;
+                }
+
+                const message = response.data && response.data.msg
+                    ? String(response.data.msg)
+                    : '测试告警已发送。';
+
+                setPanelActionMessage($msg, message, 'success');
+            }).fail(function () {
+                $btn.prop('disabled', false);
+                $spinner.removeClass('is-active');
+                setPanelActionMessage($msg, '网络错误，请稍后再试', 'error');
+            });
+        });
+    }
+
+    function setRedisActionMessage($element, text, tone) {
+        setPanelActionMessage($element, text, tone);
+    }
+
+    function setPanelActionMessage($element, text, tone) {
+        if (!$element || !$element.length) {
+            return;
+        }
+
+        const colorMap = {
+            success: '#10b981',
+            error: '#ef4444',
+            warning: '#d97706',
+            info: '#334155'
+        };
+
+        $element.css('color', colorMap[tone] || colorMap.info).text(text || '');
+    }
+
+    function extractAjaxError(response, fallback) {
+        if (response && response.data) {
+            if (typeof response.data === 'string') {
+                return response.data;
+            }
+
+            if (typeof response.data === 'object' && response.data.message) {
+                return String(response.data.message);
+            }
+        }
+
+        return fallback || '未知错误';
+    }
+
+    function notifyRedisAction(message, tone) {
+        if (
+            typeof window !== 'undefined' &&
+            window.QSRedisUi &&
+            typeof window.QSRedisUi.notify === 'function'
+        ) {
+            window.QSRedisUi.notify(message, tone || 'info', 3600);
+        }
+    }
+
+    $(document).on('click', '#qs-clear-route-isolation-logs', function () {
         const $btn = $(this);
         const $spinner = $('.qs-route-isolation-clear-spinner');
         const $msg = $('#qs-route-isolation-clear-message');
@@ -433,7 +837,7 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-cleanup-data').on('click', function () {
+    $(document).on('click', '#qs-cleanup-data', function () {
         const $btn = $(this);
         const $clearAllBtn = $('#qs-clear-all-history');
         const $spinner = $('.qs-cleanup-spinner');
@@ -462,7 +866,7 @@ jQuery(document).ready(function ($) {
             }
 
             const summary = response.data.summary || {};
-            $msg.css('color', '#10b981').text(`过期数据清理完成：删除扫描 ${summary.scans || 0}，结果 ${summary.results || 0}，审计 ${summary.audit || 0}，过期封禁 ${summary.bans || 0}，IP风险事件 ${summary.ip_risk_events || 0}，IP风险缓存 ${summary.ip_risk_profiles || 0}。面板数字显示的是当前剩余总量。`);
+            $msg.css('color', '#10b981').text(`过期数据清理完成：删除扫描 ${summary.scans || 0}，结果 ${summary.results || 0}，审计 ${summary.audit || 0}，过期封禁 ${summary.bans || 0}，IP地区缓存 ${summary.ip_geo_cache || 0}，地区限制日志 ${summary.geo_block_logs || 0}，IP风险事件 ${summary.ip_risk_events || 0}，IP风险缓存 ${summary.ip_risk_profiles || 0}。面板数字显示的是当前剩余总量。`);
 
             reloadCurrentTab(1000);
         }).fail(function () {
@@ -473,13 +877,13 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-clear-all-history').on('click', function () {
+    $(document).on('click', '#qs-clear-all-history', function () {
         const $btn = $(this);
         const $cleanupBtn = $('#qs-cleanup-data');
         const $spinner = $('.qs-cleanup-spinner');
         const $msg = $('#qs-cleanup-message');
 
-        if (!confirm('确定要清空全部历史数据吗？这会删除扫描任务、扫描结果、审计日志、封禁记录、文件基线、手机号归属地缓存、IP风险画像缓存和IP风险登录事件，但不会删除防护设置和官方规则包。此操作不可恢复。')) {
+        if (!confirm('确定要清空全部历史数据吗？这会删除扫描任务、扫描结果、审计日志、封禁记录、文件基线、手机号归属地缓存、IP地区缓存、地区限制日志、IP风险画像缓存和IP风险登录事件，但不会删除防护设置和官方规则包。此操作不可恢复。')) {
             return;
         }
 
@@ -502,7 +906,7 @@ jQuery(document).ready(function ($) {
             }
 
             const summary = response.data.summary || {};
-            $msg.css('color', '#10b981').text(`全部历史数据已清空：扫描 ${summary.scans || 0}，结果 ${summary.results || 0}，审计 ${summary.audit || 0}，封禁 ${summary.bans || 0}，基线 ${summary.baseline || 0}，手机号缓存 ${summary.phone_cache || 0}，IP风险缓存 ${summary.ip_risk_profiles || 0}，IP风险事件 ${summary.ip_risk_events || 0}`);
+            $msg.css('color', '#10b981').text(`全部历史数据已清空：扫描 ${summary.scans || 0}，结果 ${summary.results || 0}，审计 ${summary.audit || 0}，封禁 ${summary.bans || 0}，基线 ${summary.baseline || 0}，手机号缓存 ${summary.phone_cache || 0}，IP地区缓存 ${summary.ip_geo_cache || 0}，地区限制日志 ${summary.geo_block_logs || 0}，IP风险缓存 ${summary.ip_risk_profiles || 0}，IP风险事件 ${summary.ip_risk_events || 0}`);
 
             reloadCurrentTab(1000);
         }).fail(function () {
@@ -513,7 +917,161 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-clear-audit-logs').on('click', function () {
+    $(document).on('click', '#qs-cleanup-ip-geo-cache', function () {
+        const $cleanupBtn = $('#qs-cleanup-ip-geo-cache');
+        const $clearBtn = $('#qs-clear-ip-geo-cache');
+        const $spinner = $('.qs-ip-geo-cache-spinner');
+        const $msg = $('#qs-ip-geo-cache-message');
+
+        $cleanupBtn.prop('disabled', true);
+        $clearBtn.prop('disabled', true);
+        $spinner.addClass('is-active');
+        $msg.text('');
+
+        $.post(ajaxurl, {
+            action: 'qs_cleanup_ip_geo_cache',
+            nonce: nonce
+        }, function (response) {
+            $cleanupBtn.prop('disabled', false);
+            $clearBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+
+            if (!response.success) {
+                $msg.css('color', '#ef4444').text('清理失败：' + (response.data || '未知错误'));
+                return;
+            }
+
+            const deleted = response.data.deleted || 0;
+            const summary = response.data.summary || {};
+            $msg.css('color', '#10b981').text(`IP地区缓存已清理：删除过期记录 ${deleted} 条，当前剩余 ${summary.ip_geo_cache || 0} 条。`);
+
+            reloadCurrentTab(1000);
+        }).fail(function () {
+            $cleanupBtn.prop('disabled', false);
+            $clearBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+            $msg.css('color', '#ef4444').text('网络错误，请稍后再试');
+        });
+    });
+
+    $(document).on('click', '#qs-clear-ip-geo-cache', function () {
+        const $clearBtn = $('#qs-clear-ip-geo-cache');
+        const $cleanupBtn = $('#qs-cleanup-ip-geo-cache');
+        const $spinner = $('.qs-ip-geo-cache-spinner');
+        const $msg = $('#qs-ip-geo-cache-message');
+
+        if (!confirm('确定要清空全部 IP 地区缓存吗？清空后后续访问会重新请求所选 IP 查询来源。')) {
+            return;
+        }
+
+        $clearBtn.prop('disabled', true);
+        $cleanupBtn.prop('disabled', true);
+        $spinner.addClass('is-active');
+        $msg.text('');
+
+        $.post(ajaxurl, {
+            action: 'qs_clear_ip_geo_cache',
+            nonce: nonce
+        }, function (response) {
+            $clearBtn.prop('disabled', false);
+            $cleanupBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+
+            if (!response.success) {
+                $msg.css('color', '#ef4444').text('清空失败：' + (response.data || '未知错误'));
+                return;
+            }
+
+            const deleted = response.data.deleted || 0;
+            $msg.css('color', '#10b981').text(`IP地区缓存已清空：删除 ${deleted} 条。`);
+
+            reloadCurrentTab(1000);
+        }).fail(function () {
+            $clearBtn.prop('disabled', false);
+            $cleanupBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+            $msg.css('color', '#ef4444').text('网络错误，请稍后再试');
+        });
+    });
+
+    $(document).on('click', '#qs-cleanup-geo-block-logs', function () {
+        const $cleanupBtn = $('#qs-cleanup-geo-block-logs');
+        const $clearBtn = $('#qs-clear-geo-block-logs');
+        const $spinner = $('.qs-geo-block-logs-spinner');
+        const $msg = $('#qs-geo-block-logs-message');
+
+        $cleanupBtn.prop('disabled', true);
+        $clearBtn.prop('disabled', true);
+        $spinner.addClass('is-active');
+        $msg.text('');
+
+        $.post(ajaxurl, {
+            action: 'qs_cleanup_geo_block_logs',
+            nonce: nonce
+        }, function (response) {
+            $cleanupBtn.prop('disabled', false);
+            $clearBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+
+            if (!response.success) {
+                $msg.css('color', '#ef4444').text('清理失败：' + (response.data || '未知错误'));
+                return;
+            }
+
+            const deleted = response.data.deleted || 0;
+            const summary = response.data.summary || {};
+            $msg.css('color', '#10b981').text(`地区限制日志已清理：删除过期记录 ${deleted} 条，当前剩余 ${summary.geo_block_logs || 0} 条。`);
+
+            reloadCurrentTab(1000);
+        }).fail(function () {
+            $cleanupBtn.prop('disabled', false);
+            $clearBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+            $msg.css('color', '#ef4444').text('网络错误，请稍后再试');
+        });
+    });
+
+    $(document).on('click', '#qs-clear-geo-block-logs', function () {
+        const $clearBtn = $('#qs-clear-geo-block-logs');
+        const $cleanupBtn = $('#qs-cleanup-geo-block-logs');
+        const $spinner = $('.qs-geo-block-logs-spinner');
+        const $msg = $('#qs-geo-block-logs-message');
+
+        if (!confirm('确定要清空全部地区限制日志吗？此操作不可恢复。')) {
+            return;
+        }
+
+        $clearBtn.prop('disabled', true);
+        $cleanupBtn.prop('disabled', true);
+        $spinner.addClass('is-active');
+        $msg.text('');
+
+        $.post(ajaxurl, {
+            action: 'qs_clear_geo_block_logs',
+            nonce: nonce
+        }, function (response) {
+            $clearBtn.prop('disabled', false);
+            $cleanupBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+
+            if (!response.success) {
+                $msg.css('color', '#ef4444').text('清空失败：' + (response.data || '未知错误'));
+                return;
+            }
+
+            const deleted = response.data.deleted || 0;
+            $msg.css('color', '#10b981').text(`地区限制日志已清空：删除 ${deleted} 条。`);
+
+            reloadCurrentTab(1000);
+        }).fail(function () {
+            $clearBtn.prop('disabled', false);
+            $cleanupBtn.prop('disabled', false);
+            $spinner.removeClass('is-active');
+            $msg.css('color', '#ef4444').text('网络错误，请稍后再试');
+        });
+    });
+
+    $(document).on('click', '#qs-clear-audit-logs', function () {
         const $btn = $(this);
         const $spinner = $('.qs-clear-audit-spinner');
         const $msg = $('#qs-clear-audit-message');
@@ -548,12 +1106,12 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-rebuild-file-baseline').on('click', function () {
+    $(document).on('click', '#qs-rebuild-file-baseline', function () {
         const $btn = $(this);
         const $spinner = $('.qs-baseline-spinner');
         const $msg = $('#qs-baseline-message');
 
-        if (!confirm('确定要重建文件完整性基线吗？只有在你确认当前站点文件状态可信时，才应该这样做。重建后，后续扫描会以当前文件状态作为新的对照标准。')) {
+        if (!confirm('确定要重建文件完整性基线吗？仅当当前站点文件状态已确认可信时执行。重建后，后续扫描会以当前文件状态作为新的对照标准。')) {
             return;
         }
 
@@ -584,7 +1142,7 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-import-rules-package').on('click', function () {
+    $(document).on('click', '#qs-import-rules-package', function () {
         const $btn = $(this);
         const $rollbackBtn = $('#qs-rollback-rules-package');
         const $spinner = $('.qs-rules-spinner');
@@ -599,7 +1157,7 @@ jQuery(document).ready(function ($) {
             return;
         }
 
-        if (!confirm('确定要导入并启用这个官方规则包吗？新规则会影响后续扫描判断，但不会自动修改网站文件和数据库。')) {
+        if (!confirm('确定要导入并启用该官方规则包吗？新规则会影响后续扫描判断，但不会自动修改网站文件和数据库。')) {
             return;
         }
 
@@ -639,7 +1197,7 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-rollback-rules-package').on('click', function () {
+    $(document).on('click', '#qs-rollback-rules-package', function () {
         const $btn = $(this);
         const $importBtn = $('#qs-import-rules-package');
         const $spinner = $('.qs-rules-spinner');
@@ -714,7 +1272,7 @@ jQuery(document).ready(function ($) {
         const $spinner = $('.qs-sessions-spinner');
         const $msg = $('#qs-sessions-message');
 
-        if (!confirm('确定要强制下线这个登录设备吗？被踢下线后，对方需要重新登录。')) {
+        if (!confirm('确定要强制下线该登录设备吗？下线后需要重新登录。')) {
             return;
         }
 
@@ -751,7 +1309,7 @@ jQuery(document).ready(function ($) {
         const $spinner = $('.qs-sessions-spinner');
         const $msg = $('#qs-sessions-message');
         const confirmText = preserveCurrent
-            ? '确定要强制下线该用户的其他活跃会话吗？当前这个后台会话会被保留。'
+            ? '确定要强制下线该用户的其他活跃会话吗？当前后台会话会被保留。'
             : '确定要强制下线该用户的全部活跃会话吗？';
 
         if (!confirm(confirmText)) {
@@ -784,12 +1342,12 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $('#qs-destroy-all-sessions').on('click', function () {
+    $(document).on('click', '#qs-destroy-all-sessions', function () {
         const $btn = $(this);
         const $spinner = $('.qs-sessions-spinner');
         const $msg = $('#qs-sessions-message');
 
-        if (!confirm('确定要强制全部其他用户重新登录吗？系统会尽量保留当前这个管理员会话。')) {
+        if (!confirm('确定要强制全部其他用户重新登录吗？系统会尽量保留当前管理员会话。')) {
             return;
         }
 
@@ -821,18 +1379,89 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    function collectSettingsPayload() {
-        const settings = {};
+    function parseSettingFieldKeys(rawValue) {
+        return String(rawValue || '')
+            .split(',')
+            .map(function (item) {
+                return String(item || '').trim();
+            })
+            .filter(function (item) {
+                return item.length > 0;
+            });
+    }
 
-        $('.qs-setting-field').each(function () {
+    function collectExplicitSettingValue($scope, key) {
+        const $fields = $scope.find('.qs-setting-field').filter(function () {
+            return String($(this).data('settingKey') || '') === String(key);
+        });
+
+        if (!$fields.length) {
+            return '';
+        }
+
+        if ($fields.hasClass('qs-setting-multi-checkbox')) {
+            const values = [];
+            $fields.each(function () {
+                const $field = $(this);
+                if ($field.is(':checked')) {
+                    const val = String($field.val() || '').trim();
+                    if (val) {
+                        values.push(val);
+                    }
+                }
+            });
+
+            return values.join('\n');
+        }
+
+        const $visibleFields = $fields.filter(':visible');
+        const $field = $visibleFields.length ? $visibleFields.first() : $fields.first();
+
+        if ($field.is(':checkbox')) {
+            return $field.is(':checked') ? '1' : '';
+        }
+
+        return String($field.val() || '').trim();
+    }
+
+    function collectSettingsPayload(scope, explicitFieldKeys) {
+        const settings = {};
+        const fieldVisibility = {};
+        const $scope = scope && scope.length ? scope : $(document);
+        const fieldKeys = Array.isArray(explicitFieldKeys) ? explicitFieldKeys.filter(Boolean) : [];
+
+        if (fieldKeys.length) {
+            fieldKeys.forEach(function (key) {
+                settings[key] = collectExplicitSettingValue($scope, key);
+            });
+
+            return settings;
+        }
+
+        $scope.find('.qs-setting-field').each(function () {
             const $field = $(this);
             const key = $field.data('settingKey');
+            const isVisible = $field.is(':visible');
+            const hasMeta = Object.prototype.hasOwnProperty.call(fieldVisibility, key);
+            const preferCurrent = !hasMeta || (isVisible && !fieldVisibility[key]);
+            const preferExisting = hasMeta && fieldVisibility[key] && !isVisible;
 
             if (!key) {
                 return;
             }
 
             if ($field.hasClass('qs-setting-multi-checkbox')) {
+                if (preferExisting) {
+                    return;
+                }
+
+                if (preferCurrent) {
+                    settings[key] = '';
+                    fieldVisibility[key] = isVisible;
+                } else if (!hasMeta) {
+                    fieldVisibility[key] = isVisible;
+                }
+
                 if ($field.is(':checked')) {
                     const currentVal = settings[key] || '';
                     const val = ($field.val() || '').trim();
@@ -840,11 +1469,17 @@ jQuery(document).ready(function ($) {
                         settings[key] = currentVal ? currentVal + '\n' + val : val;
                     }
                 } else if (!settings.hasOwnProperty(key)) {
-                    // Ensure the key exists even if nothing is checked, so it can be cleared
+                    // 未勾选时仍提交空值，确保后端可以清空该项。
                     settings[key] = '';
                 }
                 return;
             }
+
+            if (preferExisting) {
+                return;
+            }
+
+            fieldVisibility[key] = isVisible;
 
             if ($field.is(':checkbox')) {
                 settings[key] = $field.is(':checked') ? '1' : '';
@@ -858,15 +1493,31 @@ jQuery(document).ready(function ($) {
     }
 
     function findTabByHash(tabHash) {
-        return $('.nav-tab').filter(function () {
+        return $('.qs-admin-tab').filter(function () {
             return String($(this).attr('href') || '') === String(tabHash || '');
         }).first();
     }
 
+    $(document).on('click', '.qs-subtab-btn', function () {
+        const subtab = $(this).attr('data-subtab');
+        $('.qs-subtab-btn').removeClass('button-primary');
+        $(this).addClass('button-primary');
+        $('.qs-iprisk-section').hide();
+        $('#qs-iprisk-section-' + subtab).show();
+    });
+
     function activateInitialTab() {
-        const rawHash = String(window.location.hash || '');
+        let rawHash = String(window.location.hash || '');
+        let targetSubtab = null;
+        if (rawHash === '#tab-geo-block') {
+            rawHash = '#tab-iprisk';
+            targetSubtab = 'geo';
+        }
         const tabHash = rawHash && findTabByHash(rawHash).length ? rawHash : '#tab-scanner';
         activateTab(tabHash, false);
+        if (targetSubtab) {
+            $('.qs-subtab-btn[data-subtab="' + targetSubtab + '"]').trigger('click');
+        }
     }
 
     function activateTab(tabHash, updateHash) {
@@ -874,7 +1525,7 @@ jQuery(document).ready(function ($) {
         let $tab = findTabByHash(safeHash);
 
         if (!$tab.length) {
-            $tab = $('.nav-tab').first();
+            $tab = $('.qs-admin-tab').first();
             if (!$tab.length) {
                 return;
             }
@@ -882,13 +1533,14 @@ jQuery(document).ready(function ($) {
             safeHash = String($tab.attr('href') || '#tab-scanner');
         }
 
-        $('.nav-tab').removeClass('nav-tab-active');
-        $tab.addClass('nav-tab-active');
+        $('.qs-admin-tab').removeClass('nav-tab-active').attr('aria-selected', 'false');
+        $tab.addClass('nav-tab-active').attr('aria-selected', 'true');
 
-        $('.qs-tab-content').hide();
+        $('.qs-tab-content').hide().attr('aria-hidden', 'true');
         const $content = $(safeHash.replace('#tab-', '#tab-content-'));
         if ($content.length) {
-            $content.show();
+            $content.show().attr('aria-hidden', 'false');
+            maybeLoadTabContent(safeHash, $content);
         }
 
         if (updateHash) {
@@ -901,10 +1553,14 @@ jQuery(document).ready(function ($) {
     }
 
     function reloadCurrentTab(delay) {
-        const $activeTab = $('.nav-tab.nav-tab-active').first();
+        const $activeTab = $('.qs-admin-tab.nav-tab-active').first();
         const activeHash = $activeTab.length ? String($activeTab.attr('href') || '#tab-scanner') : '#tab-scanner';
 
-        activateTab(activeHash, true);
+        if (window.history && typeof window.history.replaceState === 'function') {
+            window.history.replaceState(null, '', activeHash);
+        } else {
+            window.location.hash = activeHash;
+        }
 
         setTimeout(function () {
             location.reload();
@@ -1049,17 +1705,28 @@ jQuery(document).ready(function ($) {
             step();
         }
 
-        $previewBtn.on('click', function () {
+        $previewBtn.off('click.qsDomainReplace').on('click.qsDomainReplace', function () {
             runReplace(true);
         });
 
-        $executeBtn.on('click', function () {
+        $executeBtn.off('click.qsDomainReplace').on('click.qsDomainReplace', function () {
             if (!window.confirm('确定要执行替换吗？建议先备份数据库。')) {
                 return;
             }
             runReplace(false);
         });
     }
+
+    $(document).on('click', '.qs-tab-retry-load', function () {
+        const $content = $(this).closest('.qs-tab-content');
+        const tabKey = String($content.attr('data-tab-key') || '').trim();
+
+        if (!$content.length || !tabKey) {
+            return;
+        }
+
+        maybeLoadTabContent(`#tab-${tabKey}`, $content);
+    });
 
     function initProxyPresetHelper() {
         const $preset = $('#qs_proxy_preset');
@@ -1125,7 +1792,7 @@ jQuery(document).ready(function ($) {
         }
 
         applyPreset(true);
-        $preset.on('change', function () {
+        $preset.off('change.qsProxyPreset').on('change.qsProxyPreset', function () {
             applyPreset(false);
         });
     }
@@ -1372,11 +2039,9 @@ jQuery(document).ready(function ($) {
 
     function getProviderLabel(providerId) {
         switch (String(providerId || '')) {
-            case 'ipregistry': return 'IPRegistry';
             case 'ipdata': return 'IPData';
             case 'ip_api': return 'IP-API';
             case 'ipinfo': return 'IPinfo';
-            case 'ip_sb': return 'IP.SB';
             default: return providerId || 'Unknown';
         }
     }

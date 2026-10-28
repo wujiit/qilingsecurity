@@ -343,7 +343,7 @@ class QS_IP_Risk_Profile {
             return [];
         }
 
-        // Try cache first to reduce redundant API calls
+        // 优先读取缓存，减少重复外部查询。
         $profile = QS_DB::get_ip_risk_profile( $ip_address );
         $ttl     = QS_Protection::get_ip_risk_cache_ttl_seconds( $settings );
 
@@ -461,7 +461,7 @@ class QS_IP_Risk_Profile {
             $providers = is_array( $providers ) ? array_values( array_unique( array_filter( $providers ) ) ) : [];
         }
 
-        // In admin detail view, prefer complete data to avoid "single source looks empty" confusion.
+        // 后台详情页优先拉取完整来源，避免单一来源缺少明细。
         if ( 'admin_detail' === $event_type ) {
             $max_calls = max( $max_calls, count( $providers ) );
         }
@@ -502,15 +502,13 @@ class QS_IP_Risk_Profile {
     }
 
     private static function provider_requires_api_key( $provider ) {
-        return in_array( (string) $provider, [ 'ipregistry', 'ipdata', 'ipbset' ], true );
+        return 'ipdata' === (string) $provider;
     }
 
     private static function provider_has_credential( $provider, $credentials ) {
         $credentials = is_array( $credentials ) ? $credentials : [];
         $map         = [
-            'ipregistry' => 'ipregistry_key',
-            'ipdata'     => 'ipdata_key',
-            'ipbset'     => 'ipbset_key',
+            'ipdata' => 'ipdata_key',
         ];
 
         if ( ! isset( $map[ $provider ] ) ) {
@@ -531,7 +529,7 @@ class QS_IP_Risk_Profile {
             }
         }
 
-        $public_candidates = array_merge( $public_candidates, [ 'ip_api', 'ipinfo', 'ip_sb' ] );
+        $public_candidates = array_merge( $public_candidates, [ 'ip_api', 'ipinfo' ] );
 
         return array_values(
             array_filter(
@@ -549,18 +547,12 @@ class QS_IP_Risk_Profile {
 
     private static function query_provider( $provider, $ip_address, $settings ) {
         switch ( $provider ) {
-            case 'ipregistry':
-                return self::query_ipregistry( $ip_address, $settings );
             case 'ipdata':
                 return self::query_ipdata( $ip_address, $settings );
             case 'ip_api':
                 return self::query_ip_api( $ip_address, $settings );
             case 'ipinfo':
                 return self::query_ipinfo( $ip_address, $settings );
-            case 'ip_sb':
-                return self::query_ip_sb( $ip_address, $settings );
-            case 'ipbset':
-                return self::query_ipbset( $ip_address, $settings );
             default:
                 return [
                     'provider'   => $provider,
@@ -571,68 +563,6 @@ class QS_IP_Risk_Profile {
                     'data'       => [],
                 ];
         }
-    }
-
-    private static function query_ipregistry( $ip_address, $settings ) {
-        $credentials = QS_Protection::get_ip_risk_provider_credentials( $settings );
-        $api_key     = isset( $credentials['ipregistry_key'] ) ? trim( (string) $credentials['ipregistry_key'] ) : '';
-        if ( '' === $api_key ) {
-            $api_key = 'tryout';
-        }
-
-        $base_url = 'https://api.ipregistry.co/' . rawurlencode( $ip_address ) . '?key=' . rawurlencode( $api_key );
-        $response = self::http_get_json( $base_url, $settings );
-
-        // If custom key failed, fallback to documented public tryout key.
-        if ( ! $response['ok'] && 'tryout' !== $api_key ) {
-            $api_key  = 'tryout';
-            $base_url = 'https://api.ipregistry.co/' . rawurlencode( $ip_address ) . '?key=' . rawurlencode( $api_key );
-            $response = self::http_get_json( $base_url, $settings );
-        }
-
-        if ( ! $response['ok'] ) {
-            return self::build_error_result( 'ipregistry', $response['error'] );
-        }
-
-        $data     = is_array( $response['data'] ) ? $response['data'] : [];
-        $security = isset( $data['security'] ) && is_array( $data['security'] ) ? $data['security'] : [];
-
-        if ( empty( $security ) ) {
-            $security_url  = 'https://api.ipregistry.co/' . rawurlencode( $ip_address ) . '?key=' . rawurlencode( $api_key ) . '&fields=security';
-            $security_resp = self::http_get_json( $security_url, $settings );
-
-            if ( ! empty( $security_resp['ok'] ) && is_array( $security_resp['data'] ) ) {
-                $security_data = isset( $security_resp['data']['security'] ) && is_array( $security_resp['data']['security'] ) ? $security_resp['data']['security'] : [];
-                if ( ! empty( $security_data ) ) {
-                    $security         = $security_data;
-                    $data['security'] = $security_data;
-                }
-            }
-        }
-
-        $conn    = isset( $data['connection'] ) && is_array( $data['connection'] ) ? $data['connection'] : [];
-        $signals = [];
-        $score   = 0;
-
-        $score = max( $score, self::score_from_bool( $security, 'is_proxy', 60, 'proxy', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_tor', 85, 'tor', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_tor_exit', 88, 'tor', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_anonymous', 55, 'anonymous', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_vpn', 70, 'vpn', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_relay', 58, 'anonymous', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_cloud_provider', 42, 'datacenter', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_abuser', 75, 'abuse_medium', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_attacker', 82, 'abuse_high', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_threat', 82, 'abuse_high', $signals ) );
-        $score = max( $score, self::score_from_bool( $security, 'is_bogon', 92, 'bogon', $signals ) );
-
-        $connection_type = isset( $conn['type'] ) ? strtolower( (string) $conn['type'] ) : '';
-        if ( self::contains_any_keyword( $connection_type, [ 'hosting', 'data center', 'cloud', 'dch', 'transit' ] ) ) {
-            $score     = max( $score, 40 );
-            $signals[] = 'datacenter';
-        }
-
-        return self::build_ok_result( 'ipregistry', $score, $signals, $data );
     }
 
     private static function query_ipdata( $ip_address, $settings ) {
@@ -682,10 +612,10 @@ class QS_IP_Risk_Profile {
     }
 
     private static function query_ip_api( $ip_address, $settings ) {
-        // Use optimized fields to avoid timeouts on public endpoint
+        // 公共接口仅请求必要字段，降低超时概率。
         $fields   = 'status,message,continent,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org';
         $url      = 'http://ip-api.com/json/' . rawurlencode( $ip_address ) . '?fields=' . $fields;
-        $response = self::http_get_json( $url, $settings, [ 'sslverify' => false ] );
+        $response = self::http_get_json( $url, $settings );
 
         if ( ! $response['ok'] ) {
             return self::build_error_result( 'ip_api', $response['error'] );
@@ -699,8 +629,7 @@ class QS_IP_Risk_Profile {
         $signals = [];
         $score   = 0;
 
-        // Anonymity fields (proxy, hosting) are often missing or cause delays on free endpoint,
-        // so we focus on geolocation/ISP data as per user feedback.
+        // 免费接口的匿名字段不稳定，当前仅保留地理位置与 ISP 数据。
 
         return self::build_ok_result( 'ip_api', $score, $signals, $data );
     }
@@ -744,7 +673,7 @@ class QS_IP_Risk_Profile {
 
         $data       = is_array( $response['data'] ) ? $response['data'] : [];
 
-        // Handle nested "geo" object in newer Lite API
+        // 兼容新版 Lite API 的嵌套 geo 对象。
         if ( isset( $data['geo'] ) && is_array( $data['geo'] ) ) {
             foreach ( [ 'country', 'country_code', 'continent', 'continent_code', 'region', 'city', 'timezone'] as $f ) {
                 if ( isset( $data['geo'][$f] ) && ! isset( $data[$f] ) ) {
@@ -753,10 +682,10 @@ class QS_IP_Risk_Profile {
             }
         }
 
-        // Handle nested "as" or "asn" objects
+        // 兼容嵌套 as/asn 对象。
         $asn_raw = isset( $data['as'] ) ? $data['as'] : ( isset( $data['asn'] ) ? $data['asn'] : [] );
         if ( ! is_array( $asn_raw ) && isset( $data['asn'] ) ) {
-             $asn_raw = $data['asn']; // Could be a string in some versions
+            $asn_raw = $data['asn']; // 部分版本返回字符串。
         }
 
         $privacy    = isset( $data['privacy'] ) && is_array( $data['privacy'] ) ? $data['privacy'] : [];
@@ -835,102 +764,6 @@ class QS_IP_Risk_Profile {
         return self::build_ok_result( 'ipinfo', $score, $signals, $data );
     }
 
-    private static function query_ip_sb( $ip_address, $settings ) {
-        $ip_address = self::normalize_ip_address( $ip_address );
-        if ( '' === $ip_address ) {
-            return self::build_skipped_result( 'ip_sb', 'invalid_ip' );
-        }
-
-        // According to official documentation: https://api.ip.sb/geoip/185.222.222.222
-        $url  = 'https://api.ip.sb/geoip/' . str_replace( '%3A', ':', rawurlencode( $ip_address ) );
-        $args = [
-            'headers' => [
-                'Accept' => 'application/json',
-            ],
-            // Some free services return visitor IP when called with a generic or missing User-Agent.
-            'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 QilingSecurity/' . ( defined( 'QS_VERSION' ) ? QS_VERSION : '1.0' ),
-        ];
-
-        $response = self::http_get_json( $url, $settings, $args );
-
-        if ( empty( $response['ok'] ) ) {
-            return self::build_error_result( 'ip_sb', isset( $response['error'] ) ? $response['error'] : 'query_failed' );
-        }
-
-        $data      = $response['data'];
-        $type      = isset( $data['type'] ) ? strtolower( (string) $data['type'] ) : '';
-        $org       = strtolower(
-            trim(
-                implode(
-                    ' ',
-                    array_filter(
-                        [
-                            isset( $data['organization'] ) ? (string) $data['organization'] : '',
-                            isset( $data['asn_organization'] ) ? (string) $data['asn_organization'] : '',
-                            isset( $data['isp'] ) ? (string) $data['isp'] : '',
-                        ]
-                    )
-                )
-            )
-        );
-        $signals   = [];
-        $score     = null;
-
-        if ( self::contains_any_keyword( $type, [ 'hosting', 'data center', 'cloud', 'proxy', 'vps' ] ) || self::contains_any_keyword( $org, [ 'hosting', 'data center', 'cloud', 'vps' ] ) ) {
-            $signals[] = 'datacenter';
-            $score     = 38;
-        }
-
-        return self::build_ok_result( 'ip_sb', $score, $signals, $data );
-    }
-    private static function query_ipbset( $ip_address, $settings ) {
-        $credentials = QS_Protection::get_ip_risk_provider_credentials( $settings );
-        $api_key     = isset( $credentials['ipbset_key'] ) ? trim( (string) $credentials['ipbset_key'] ) : '';
-
-        if ( '' === $api_key ) {
-            return self::build_skipped_result( 'ipbset', 'missing_api_key' );
-        }
-
-        $url = add_query_arg(
-            [
-                'key'       => $api_key,
-                'ipAddress' => $ip_address,
-            ],
-            'https://api.jishishuke.com/api/jsap/ipl/ipv4/risk/lite/v1'
-        );
-
-        $response = self::http_get_json( $url, $settings, [ 'headers' => [ 'Content-Type' => 'application/x-www-form-urlencoded;charset:utf-8' ] ] );
-
-        if ( ! $response['ok'] ) {
-            return self::build_error_result( 'ipbset', $response['error'] );
-        }
-
-        $json = $response['data'];
-        if ( empty( $json['code'] ) || 200 !== (int) $json['code'] ) {
-            return self::build_error_result( 'ipbset', ! empty( $json['msg'] ) ? (string) $json['msg'] : 'api_error' );
-        }
-
-        $data    = isset( $json['data'] ) ? $json['data'] : [];
-        $signals = [];
-        $score   = isset( $data['score'] ) ? (int) $data['score'] : 0;
-
-        // Map boolean fields to signals
-        self::score_from_bool( $data, 'isProxy', 0, 'proxy', $signals );
-        self::score_from_bool( $data, 'proxy', 0, 'proxy', $signals );
-        self::score_from_bool( $data, 'vpn', 0, 'vpn', $signals );
-        self::score_from_bool( $data, 'tor', 0, 'tor', $signals );
-        self::score_from_bool( $data, 'torExit', 0, 'tor', $signals );
-        self::score_from_bool( $data, 'relay', 0, 'anonymous', $signals );
-        self::score_from_bool( $data, 'anonymous', 0, 'anonymous', $signals );
-        self::score_from_bool( $data, 'attacker', 0, 'abuse_high', $signals );
-        self::score_from_bool( $data, 'bot', 0, 'abuse_medium', $signals );
-        self::score_from_bool( $data, 'spam', 0, 'abuse_medium', $signals );
-        self::score_from_bool( $data, 'idc', 0, 'datacenter', $signals );
-        self::score_from_bool( $data, 'bogon', 0, 'bogon', $signals );
-
-        return self::build_ok_result( 'ipbset', $score, $signals, $data );
-    }
-
 
     private static function http_get_json( $url, $settings, $args = [] ) {
         $headers = isset( $args['headers'] ) && is_array( $args['headers'] ) ? $args['headers'] : [];
@@ -946,7 +779,7 @@ class QS_IP_Risk_Profile {
             'user-agent' => isset( $args['user-agent'] ) ? (string) $args['user-agent'] : 'QilingSecurity/' . ( defined( 'QS_VERSION' ) ? QS_VERSION : '1.0.0' ),
         ];
 
-        $response = wp_remote_get( $url, $request );
+        $response = wp_safe_remote_get( $url, $request );
         if ( is_wp_error( $response ) ) {
             return [
                 'ok'    => false,
@@ -961,12 +794,12 @@ class QS_IP_Risk_Profile {
         if ( ! is_array( $json ) ) {
             $body_text = trim( (string) $body );
 
-            // JSONP fallback: callback({...});
+            // 兼容 JSONP 返回：callback({...});
             if ( preg_match( '/^[A-Za-z0-9_$]+\((.*)\)\s*;?$/s', $body_text, $matches ) && isset( $matches[1] ) ) {
                 $json = json_decode( (string) $matches[1], true );
             }
 
-            // Some providers may return trailing commas in object/array payload.
+            // 兼容部分接口返回对象/数组尾随逗号。
             if ( ! is_array( $json ) && '' !== $body_text ) {
                 $normalized = preg_replace( '/,\s*([}\]])/', '$1', $body_text );
                 if ( is_string( $normalized ) ) {
@@ -1324,6 +1157,19 @@ class QS_IP_Risk_Profile {
                 'user_id'  => $user_id,
                 'username' => $username,
                 'ip'       => $ip_address,
+            ]
+        );
+
+        QS_Alert_Center::trigger_event(
+            'ip_risk',
+            '登录 IP 风险画像命中',
+            [ $detail ],
+            [
+                'ip'          => $ip_address,
+                'username'    => $username,
+                'risk_level'  => $risk_level,
+                'risk_score'  => $score,
+                'fingerprint' => 'ip-risk|' . $ip_address . '|' . $risk_level . '|' . $status,
             ]
         );
     }

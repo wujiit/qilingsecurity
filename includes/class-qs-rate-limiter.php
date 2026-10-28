@@ -183,6 +183,17 @@ class QS_Rate_Limiter {
                 'ip' => $ip,
             ]
         );
+
+        QS_Alert_Center::trigger_event(
+            'rate_limit',
+            '行为限速触发',
+            [ $detail ],
+            [
+                'ip'          => $ip,
+                'request_path'=> QS_Audit::get_request_path(),
+                'fingerprint' => 'rate-limit|' . sanitize_key( (string) $rule['id'] ) . '|' . $ip,
+            ]
+        );
     }
 
     private static function deny_request( $rule, $state ) {

@@ -6,6 +6,14 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 class QS_Audit {
 
+    private static $request_path_cache = null;
+
+    private static $whitelisted_ips_cache = [];
+
+    private static $trusted_request_paths_cache = [];
+
+    private static $trusted_proxy_rules_cache = [];
+
     public static function init() {
         $options = QS_Protection::get_settings();
         
@@ -53,7 +61,13 @@ class QS_Audit {
 
     public static function get_whitelisted_ips( $settings = null ) {
         $settings = is_array( $settings ) ? $settings : QS_Protection::get_settings();
-        $ips      = QS_Protection::parse_list_setting( $settings['trusted_ips'] );
+        $cache_key = self::get_settings_cache_key( $settings, [ 'trusted_ips' ] );
+
+        if ( ! isset( self::$whitelisted_ips_cache[ $cache_key ] ) ) {
+            self::$whitelisted_ips_cache[ $cache_key ] = QS_Protection::parse_list_setting( $settings['trusted_ips'] );
+        }
+
+        $ips = self::$whitelisted_ips_cache[ $cache_key ];
 
         return apply_filters( 'qs_trusted_ips', $ips, $settings );
     }
@@ -76,16 +90,28 @@ class QS_Audit {
     }
 
     public static function get_request_path() {
+        if ( null !== self::$request_path_cache ) {
+            return self::$request_path_cache;
+        }
+
         $request_uri = isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( $_SERVER['REQUEST_URI'] ) : '/';
         $path        = wp_parse_url( $request_uri, PHP_URL_PATH );
         $path        = is_string( $path ) ? $path : '/';
 
-        return '/' . ltrim( $path, '/' );
+        self::$request_path_cache = '/' . ltrim( $path, '/' );
+
+        return self::$request_path_cache;
     }
 
     public static function get_trusted_request_paths( $settings = null ) {
         $settings = is_array( $settings ) ? $settings : QS_Protection::get_settings();
-        $paths    = QS_Protection::parse_list_setting( $settings['trusted_request_paths'] );
+        $cache_key = self::get_settings_cache_key( $settings, [ 'trusted_request_paths' ] );
+
+        if ( ! isset( self::$trusted_request_paths_cache[ $cache_key ] ) ) {
+            self::$trusted_request_paths_cache[ $cache_key ] = QS_Protection::parse_list_setting( $settings['trusted_request_paths'] );
+        }
+
+        $paths = self::$trusted_request_paths_cache[ $cache_key ];
 
         return apply_filters( 'qs_trusted_request_paths', $paths, $settings );
     }
@@ -232,15 +258,33 @@ class QS_Audit {
 
     private static function get_trusted_proxy_rules( $settings = null ) {
         $settings = is_array( $settings ) ? $settings : QS_Protection::get_settings();
-        $proxies  = array_merge(
-            QS_Protection::get_trusted_proxy_ips( $settings ),
-            (array) apply_filters( 'qs_trusted_proxy_ips', [], $settings )
-        );
+        $cache_key = self::get_settings_cache_key( $settings, [ 'trusted_proxy_ips', 'proxy_preset' ] );
 
-        $proxies = array_map( 'trim', array_map( 'strval', $proxies ) );
-        $proxies = array_values( array_unique( array_filter( $proxies ) ) );
+        if ( ! isset( self::$trusted_proxy_rules_cache[ $cache_key ] ) ) {
+            $proxies = array_merge(
+                QS_Protection::get_trusted_proxy_ips( $settings ),
+                (array) apply_filters( 'qs_trusted_proxy_ips', [], $settings )
+            );
 
-        return $proxies;
+            $proxies = array_map( 'trim', array_map( 'strval', $proxies ) );
+            $proxies = array_values( array_unique( array_filter( $proxies ) ) );
+
+            self::$trusted_proxy_rules_cache[ $cache_key ] = $proxies;
+        }
+
+        return self::$trusted_proxy_rules_cache[ $cache_key ];
+    }
+
+    private static function get_settings_cache_key( $settings, $keys ) {
+        $settings  = is_array( $settings ) ? $settings : QS_Protection::get_settings();
+        $keys      = array_values( array_filter( (array) $keys, 'is_string' ) );
+        $signature = [];
+
+        foreach ( $keys as $key ) {
+            $signature[ $key ] = isset( $settings[ $key ] ) ? $settings[ $key ] : null;
+        }
+
+        return md5( wp_json_encode( $signature ) );
     }
 
     private static function resolve_forwarded_header_ip( $header_name, $raw_value, $trusted_proxies, $strict_proxy_mode = true ) {

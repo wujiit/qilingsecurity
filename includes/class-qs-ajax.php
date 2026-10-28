@@ -17,6 +17,10 @@ class QS_Ajax {
         add_action( 'wp_ajax_qs_update_result_status', [ __CLASS__, 'handle_update_result_status' ] );
         add_action( 'wp_ajax_qs_cleanup_data', [ __CLASS__, 'handle_cleanup_data' ] );
         add_action( 'wp_ajax_qs_clear_all_history', [ __CLASS__, 'handle_clear_all_history' ] );
+        add_action( 'wp_ajax_qs_cleanup_ip_geo_cache', [ __CLASS__, 'handle_cleanup_ip_geo_cache' ] );
+        add_action( 'wp_ajax_qs_clear_ip_geo_cache', [ __CLASS__, 'handle_clear_ip_geo_cache' ] );
+        add_action( 'wp_ajax_qs_cleanup_geo_block_logs', [ __CLASS__, 'handle_cleanup_geo_block_logs' ] );
+        add_action( 'wp_ajax_qs_clear_geo_block_logs', [ __CLASS__, 'handle_clear_geo_block_logs' ] );
         add_action( 'wp_ajax_qs_clear_audit_logs', [ __CLASS__, 'handle_clear_audit_logs' ] );
         add_action( 'wp_ajax_qs_rebuild_file_baseline', [ __CLASS__, 'handle_rebuild_file_baseline' ] );
         add_action( 'wp_ajax_qs_import_rules_package', [ __CLASS__, 'handle_import_rules_package' ] );
@@ -24,18 +28,46 @@ class QS_Ajax {
         add_action( 'wp_ajax_qs_destroy_session', [ __CLASS__, 'handle_destroy_session' ] );
         add_action( 'wp_ajax_qs_destroy_user_sessions', [ __CLASS__, 'handle_destroy_user_sessions' ] );
         add_action( 'wp_ajax_qs_destroy_all_sessions', [ __CLASS__, 'handle_destroy_all_sessions' ] );
-        add_action( 'wp_ajax_qs_domain_replace', [ __CLASS__, 'handle_domain_replace' ] );
+
         add_action( 'wp_ajax_qs_get_ip_risk_profile_detail', [ __CLASS__, 'handle_get_ip_risk_profile_detail' ] );
         add_action( 'wp_ajax_qs_clear_ip_risk_data', [ __CLASS__, 'handle_clear_ip_risk_data' ] );
         add_action( 'wp_ajax_qs_delete_ip_risk_profile', [ __CLASS__, 'handle_delete_ip_risk_profile' ] );
         add_action( 'wp_ajax_qs_clear_route_isolation_logs', [ __CLASS__, 'handle_clear_route_isolation_logs' ] );
+        add_action( 'wp_ajax_qs_flush_redis_cache', [ __CLASS__, 'handle_flush_redis_cache' ] );
+        add_action( 'wp_ajax_qs_run_redis_cache_probe', [ __CLASS__, 'handle_run_redis_cache_probe' ] );
+        add_action( 'wp_ajax_qs_sync_redis_dropin', [ __CLASS__, 'handle_sync_redis_dropin' ] );
+        add_action( 'wp_ajax_qs_run_health_check', [ __CLASS__, 'handle_run_health_check' ] );
+        add_action( 'wp_ajax_qs_send_security_alert_test', [ __CLASS__, 'handle_send_security_alert_test' ] );
+        add_action( 'wp_ajax_qs_load_admin_tab', [ __CLASS__, 'handle_load_admin_tab' ] );
+    }
+
+    public static function handle_load_admin_tab() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $tab_key = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : '';
+        $markup  = QS_Admin::get_admin_tab_markup( $tab_key );
+
+        if ( is_wp_error( $markup ) ) {
+            wp_send_json_error( $markup->get_error_message() );
+        }
+
+        wp_send_json_success(
+            [
+                'tab'  => $tab_key,
+                'html' => $markup,
+            ]
+        );
     }
 
     public static function handle_run_scan() {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $step    = isset( $_POST['step'] ) ? sanitize_text_field( wp_unslash( $_POST['step'] ) ) : '';
@@ -49,7 +81,7 @@ class QS_Ajax {
             wp_send_json_success(
                 [
                     'scan_id' => $new_id,
-                    'message' => '任务已创建',
+                    'message' => '扫描任务已创建。',
                 ]
             );
         }
@@ -57,6 +89,39 @@ class QS_Ajax {
         if ( 'finish' === $step ) {
             QS_DB::finish_scan( $scan_id );
             self::clear_scan_runtime_states( $scan_id, array_keys( $steps ) );
+
+            $scan_results   = QS_DB::get_results( $scan_id );
+            $critical_count = 0;
+            $warning_count  = 0;
+
+            foreach ( (array) $scan_results as $scan_result ) {
+                $severity = isset( $scan_result->severity ) ? sanitize_key( (string) $scan_result->severity ) : '';
+
+                if ( 'critical' === $severity ) {
+                    $critical_count++;
+                } elseif ( 'warning' === $severity ) {
+                    $warning_count++;
+                }
+            }
+
+            if ( ( $critical_count + $warning_count ) > 0 ) {
+                QS_Alert_Center::trigger_event(
+                    'scan_risk',
+                    '全盘安全体检发现风险',
+                    [
+                        sprintf( '本次扫描共发现 %d 项安全风险（其中严重风险 %d 项，告警风险 %d 项）。', $critical_count + $warning_count, $critical_count, $warning_count ),
+                        '请及时登录 WordPress 后台【启灵安全防护】查看详细体检报告并处理。',
+                    ],
+                    [
+                        'scan_id'      => $scan_id,
+                        'issue_count'  => $critical_count + $warning_count,
+                        'critical'     => $critical_count,
+                        'warning'      => $warning_count,
+                        'fingerprint'  => 'scan-' . absint( $scan_id ),
+                    ]
+                );
+            }
+
             wp_send_json_success( [ 'msg' => '全盘体检结束' ] );
         }
 
@@ -65,7 +130,7 @@ class QS_Ajax {
         }
 
         if ( ! isset( $steps[ $step ] ) ) {
-            wp_send_json_error( '未知的扫描步骤' );
+            wp_send_json_error( '未知的扫描步骤。' );
         }
 
         $step_config = $steps[ $step ];
@@ -102,53 +167,216 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
-        $raw_settings = isset( $_POST['settings'] ) ? wp_unslash( $_POST['settings'] ) : [];
-        $settings     = QS_Protection::sanitize_settings( $raw_settings );
+        $raw_settings      = isset( $_POST['settings'] ) ? wp_unslash( $_POST['settings'] ) : [];
+        $existing_settings = QS_Protection::get_settings();
+        $merged_settings   = array_merge(
+            is_array( $existing_settings ) ? $existing_settings : [],
+            is_array( $raw_settings ) ? $raw_settings : []
+        );
+        $settings          = QS_Protection::sanitize_settings( $merged_settings );
 
         update_option( 'qs_protection_settings', $settings );
+        QS_Protection::clear_settings_cache();
 
-        wp_send_json_success( [ 'msg' => '防护设置已成功保存！可能需要刷新页面生效。' ] );
+        $message    = '保存成功。';
+        $tone       = 'success';
+        $redis_sync = QS_Redis_Cache::sync_dropin( $settings );
+
+        if ( is_wp_error( $redis_sync ) ) {
+            $message = '保存成功，但 Redis 对象缓存同步失败：' . $redis_sync->get_error_message();
+            $tone = 'warning';
+        }
+
+        wp_send_json_success(
+            [
+                'msg'  => $message,
+                'tone' => $tone,
+            ]
+        );
+    }
+
+    public static function handle_flush_redis_cache() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $redis_status = QS_Redis_Cache::get_status();
+        if ( ! $redis_status['enabled'] ) {
+            wp_send_json_error( '当前尚未启用 Redis 对象缓存。' );
+        }
+
+        if ( $redis_status['dropin_exists'] && ! $redis_status['dropin_managed'] ) {
+            wp_send_json_error( '当前 object-cache.php 不由启灵安全防护托管，已跳过刷新以避免影响其他缓存方案。' );
+        }
+
+        $result = QS_Redis_Cache::flush_cache();
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message() );
+        }
+
+        if ( class_exists( 'QS_Audit' ) ) {
+            QS_Audit::record_manual_event( '刷新 Redis 缓存', '管理员手动刷新了 Redis 持久对象缓存，并同步了缓存 drop-in。' );
+        }
+
+        wp_send_json_success(
+            [
+                'msg'       => isset( $result['message'] ) ? $result['message'] : 'Redis 对象缓存已刷新。',
+                'refreshed' => isset( $result['refreshed'] ) ? array_values( (array) $result['refreshed'] ) : [],
+            ]
+        );
+    }
+
+    public static function handle_run_redis_cache_probe() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $result = QS_Redis_Cache::run_probe();
+
+        if ( empty( $result['ok'] ) ) {
+            wp_send_json_error(
+                [
+                    'message' => ! empty( $result['message'] ) ? $result['message'] : 'Redis 缓存自检未通过。',
+                    'steps'   => ! empty( $result['steps'] ) ? array_values( (array) $result['steps'] ) : [],
+                ]
+            );
+        }
+
+        if ( class_exists( 'QS_Audit' ) ) {
+            QS_Audit::record_manual_event( 'Redis 缓存自检', '管理员执行了 Redis 持久对象缓存自检探测（测试写入、读取、删除及分组刷新）。' );
+        }
+
+        wp_send_json_success(
+            [
+                'msg'   => ! empty( $result['message'] ) ? $result['message'] : 'Redis 缓存自检已通过。',
+                'steps' => ! empty( $result['steps'] ) ? array_values( (array) $result['steps'] ) : [],
+            ]
+        );
+    }
+
+    public static function handle_sync_redis_dropin() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $result = QS_Redis_Cache::sync_dropin();
+
+        if ( is_wp_error( $result ) ) {
+            wp_send_json_error( $result->get_error_message() );
+        }
+
+        if ( class_exists( 'QS_Audit' ) ) {
+            QS_Audit::record_manual_event( '同步 Redis Drop-in', '管理员手动重新同步了 wp-content/object-cache.php 文件。' );
+        }
+
+        wp_send_json_success(
+            [
+                'msg'     => ! empty( $result['message'] ) ? $result['message'] : 'Redis drop-in 已重新同步。',
+                'changed' => ! empty( $result['changed'] ),
+            ]
+        );
+    }
+
+    public static function handle_run_health_check() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $settings = QS_Protection::get_settings();
+        $report   = QS_Health_Check::run_checks( $settings );
+        $summary  = isset( $report['summary'] ) && is_array( $report['summary'] ) ? $report['summary'] : [];
+
+        if ( class_exists( 'QS_Audit' ) ) {
+            QS_Audit::record_manual_event( '插件健康自检', '管理员执行了插件健康自检（检查数据表、规则签名、异步任务及 Redis 集成）。' );
+        }
+
+        wp_send_json_success(
+            [
+                'msg'    => sprintf(
+                    '插件健康自检已完成：%d 项通过，%d 项告警，%d 项严重。',
+                    isset( $summary['success'] ) ? (int) $summary['success'] : 0,
+                    isset( $summary['warning'] ) ? (int) $summary['warning'] : 0,
+                    isset( $summary['critical'] ) ? (int) $summary['critical'] : 0
+                ),
+                'report' => $report,
+            ]
+        );
+    }
+
+    public static function handle_send_security_alert_test() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $result  = QS_Alert_Center::send_test_alert();
+        $message = QS_Alert_Center::summarize_dispatch_result( $result );
+
+        if ( class_exists( 'QS_Audit' ) ) {
+            QS_Audit::record_manual_event( '发送测试告警', '管理员手动发送了安全测试告警（验证邮件、飞书或钉钉通道连通性）。' );
+        }
+
+        if ( empty( $result['success'] ) ) {
+            wp_send_json_error( $message );
+        }
+
+        wp_send_json_success(
+            [
+                'msg'    => $message,
+                'result' => $result,
+            ]
+        );
     }
 
     public static function handle_unban_ip() {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $ip = isset( $_POST['ip'] ) ? sanitize_text_field( wp_unslash( $_POST['ip'] ) ) : '';
         if ( $ip ) {
             QS_DB::unban_ip( $ip );
             QS_Audit::record_manual_event( '解封 IP', "手动解除封禁 IP: {$ip}" );
-            wp_send_json_success( [ 'msg' => 'IP 解封成功！' ] );
+            wp_send_json_success( [ 'msg' => 'IP 解封成功。' ] );
         }
 
-        wp_send_json_error( 'IP 无效。' );
+        wp_send_json_error( '无效的 IP 地址。' );
     }
 
     public static function handle_update_result_status() {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $result_id = isset( $_POST['result_id'] ) ? absint( $_POST['result_id'] ) : 0;
         $status    = isset( $_POST['status'] ) ? sanitize_key( wp_unslash( $_POST['status'] ) ) : '';
 
         if ( ! $result_id || ! in_array( $status, [ 'open', 'resolved', 'ignored' ], true ) ) {
-            wp_send_json_error( '参数无效。' );
+            wp_send_json_error( '请求参数无效。' );
         }
 
         if ( ! QS_DB::update_result_status( $result_id, $status ) ) {
-            wp_send_json_error( '处理状态更新失败。' );
+            wp_send_json_error( '更新扫描结果状态失败。' );
         }
 
-        QS_Audit::record_manual_event( '更新扫描结果状态', "结果 #{$result_id} 已标记为 {$status}" );
+        QS_Audit::record_manual_event( '更新扫描结果状态', "扫描结果 #{$result_id} 标记为: {$status}" );
 
         wp_send_json_success(
             [
@@ -163,7 +391,7 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $settings = QS_Protection::get_settings();
@@ -172,17 +400,19 @@ class QS_Ajax {
         QS_Audit::record_manual_event(
             '清理安全历史数据',
             sprintf(
-                '删除扫描 %d 条、结果 %d 条、审计 %d 条、过期封禁 %d 条。',
+                '已清理 %d 次扫描记录、%d 条扫描结果、%d 条审计日志、%d 条过期封禁、%d 条地区拦截日志以及 %d 条路由隔离日志。',
                 $summary['scans'],
                 $summary['results'],
                 $summary['audit'],
-                $summary['bans']
+                $summary['bans'],
+                isset( $summary['geo_block_logs'] ) ? $summary['geo_block_logs'] : 0,
+                isset( $summary['rest_isolation_logs'] ) ? $summary['rest_isolation_logs'] : 0
             )
         );
 
         wp_send_json_success(
             [
-                'msg'     => '过期历史数据清理完成。',
+                'msg'     => '已清理过期历史数据。',
                 'summary' => $summary,
             ]
         );
@@ -192,15 +422,109 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $summary = QS_DB::clear_all_history();
 
         wp_send_json_success(
             [
-                'msg'     => '全部历史数据已清空。',
+                'msg'     => '所有历史数据已清空。',
                 'summary' => $summary,
+            ]
+        );
+    }
+
+    public static function handle_cleanup_ip_geo_cache() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $deleted = QS_DB::cleanup_expired_ip_geo_cache( 180 );
+
+        QS_Audit::record_manual_event(
+            '清理 IP 地区缓存',
+            sprintf( '已清理 %d 条过期 IP 地区缓存记录。', $deleted )
+        );
+
+        wp_send_json_success(
+            [
+                'msg'     => '已清理过期 IP 地区缓存。',
+                'deleted' => $deleted,
+                'summary' => QS_DB::get_storage_summary(),
+            ]
+        );
+    }
+
+    public static function handle_clear_ip_geo_cache() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $deleted = QS_DB::clear_ip_geo_cache();
+
+        QS_Audit::record_manual_event(
+            '清空 IP 地区缓存',
+            sprintf( '已清空 %d 条 IP 地区缓存记录。', $deleted )
+        );
+
+        wp_send_json_success(
+            [
+                'msg'     => 'IP 地区缓存已清空。',
+                'deleted' => $deleted,
+                'summary' => QS_DB::get_storage_summary(),
+            ]
+        );
+    }
+
+    public static function handle_cleanup_geo_block_logs() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $settings = QS_Protection::get_settings();
+        $days     = isset( $settings['geo_block_log_retention_days'] ) ? absint( $settings['geo_block_log_retention_days'] ) : 180;
+        $deleted  = QS_DB::cleanup_expired_geo_block_logs( $days );
+
+        QS_Audit::record_manual_event(
+            '清理地区限制日志',
+            sprintf( '已清理 %d 条过期地区限制日志。', $deleted )
+        );
+
+        wp_send_json_success(
+            [
+                'msg'     => '已清理过期地区限制日志。',
+                'deleted' => $deleted,
+                'summary' => QS_DB::get_storage_summary(),
+            ]
+        );
+    }
+
+    public static function handle_clear_geo_block_logs() {
+        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
+
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( '权限不足，拒绝访问。' );
+        }
+
+        $deleted = QS_DB::clear_geo_block_logs();
+
+        QS_Audit::record_manual_event(
+            '清空地区限制日志',
+            sprintf( '已清空 %d 条地区限制日志。', $deleted )
+        );
+
+        wp_send_json_success(
+            [
+                'msg'     => '地区限制日志已清空。',
+                'deleted' => $deleted,
+                'summary' => QS_DB::get_storage_summary(),
             ]
         );
     }
@@ -209,7 +533,7 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $actor_id   = get_current_user_id();
@@ -224,13 +548,13 @@ class QS_Ajax {
             $actor_id,
             '' !== $actor_name ? $actor_name : 'System/Guest',
             '审计日志清空',
-            sprintf( '管理员手动清空操作审计日志，删除 %d 条历史记录。', (int) $deleted ),
+            sprintf( 'An administrator cleared audit logs and removed %d records.', (int) $deleted ),
             '' !== $actor_ip ? $actor_ip : '0.0.0.0'
         );
 
         wp_send_json_success(
             [
-                'msg'     => sprintf( '审计日志已清空，本次删除 %d 条记录。', $deleted ),
+                'msg'     => sprintf( 'Audit logs cleared. Removed %d records this time.', $deleted ),
                 'deleted' => $deleted,
             ]
         );
@@ -240,18 +564,18 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $scanner = new QS_Scanner();
         $result  = $scanner->rebuild_file_integrity_baseline();
         $count   = isset( $result['count'] ) ? absint( $result['count'] ) : 0;
 
-        QS_Audit::record_manual_event( '重建文件基线', sprintf( '手动重建文件完整性基线，共写入 %d 条记录。', $count ) );
+        QS_Audit::record_manual_event( '重建文件基线', sprintf( '已重建文件完整性基线，共记录 %d 个文件特征。', $count ) );
 
         wp_send_json_success(
             [
-                'msg'       => sprintf( '文件基线已重建，共记录 %d 个文件。', $count ),
+                'msg'       => sprintf( '已为 %d 个核心及插件文件重建完整性基线。', $count ),
                 'count'     => $count,
                 'truncated' => ! empty( $result['truncated'] ),
             ]
@@ -262,22 +586,22 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $file   = isset( $_FILES['package'] ) ? $_FILES['package'] : [];
         $result = QS_Rules::import_package_from_upload( $file );
 
         if ( empty( $result['success'] ) ) {
-            wp_send_json_error( ! empty( $result['message'] ) ? $result['message'] : '规则包导入失败。' );
+            wp_send_json_error( ! empty( $result['message'] ) ? $result['message'] : '导入官方规则包失败。' );
         }
 
         $version = ! empty( $result['package']['version'] ) ? $result['package']['version'] : 'unknown';
-        QS_Audit::record_manual_event( '导入官方规则包', sprintf( '管理员导入并启用了官方规则包版本 [%s]。', $version ) );
+        QS_Audit::record_manual_event( '导入官方规则包', sprintf( '管理员导入并启用了版本为 [%s] 的官方防护规则包。', $version ) );
 
         wp_send_json_success(
             [
-                'msg'    => ! empty( $result['message'] ) ? $result['message'] : '规则包导入成功。',
+                'msg'    => ! empty( $result['message'] ) ? $result['message'] : '官方规则包导入并启用成功。',
                 'status' => QS_Rules::get_package_status(),
             ]
         );
@@ -287,21 +611,21 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $result = QS_Rules::rollback_to_previous_package();
 
         if ( empty( $result['success'] ) ) {
-            wp_send_json_error( ! empty( $result['message'] ) ? $result['message'] : '规则包回滚失败。' );
+            wp_send_json_error( ! empty( $result['message'] ) ? $result['message'] : '回滚官方规则包失败。' );
         }
 
         $version = isset( $result['status']['version'] ) ? (string) $result['status']['version'] : 'builtin';
-        QS_Audit::record_manual_event( '回滚官方规则包', sprintf( '管理员执行官方规则回滚，当前生效版本 [%s]。', $version ) );
+        QS_Audit::record_manual_event( '回滚官方规则包', sprintf( '管理员回滚了官方安全规则包，当前激活版本为: [%s]。', $version ) );
 
         wp_send_json_success(
             [
-                'msg'    => ! empty( $result['message'] ) ? $result['message'] : '规则包回滚成功。',
+                'msg'    => ! empty( $result['message'] ) ? $result['message'] : '官方规则包已成功回滚。',
                 'status' => QS_Rules::get_package_status(),
             ]
         );
@@ -311,38 +635,38 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $user_id  = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
         $verifier = isset( $_POST['verifier'] ) ? sanitize_text_field( wp_unslash( $_POST['verifier'] ) ) : '';
 
         if ( ! $user_id || '' === $verifier ) {
-            wp_send_json_error( '参数无效。' );
+            wp_send_json_error( '请求参数无效。' );
         }
 
         if ( ! QS_Session_Manager::destroy_session( $user_id, $verifier ) ) {
-            wp_send_json_error( '指定会话不存在或销毁失败。' );
+            wp_send_json_error( '指定的登录会话不存在或已失效。' );
         }
 
         $user = get_userdata( $user_id );
-        QS_Audit::record_manual_event( '踢下线单个会话', sprintf( '已下线用户 [%s] 的一个活跃会话。', $user ? $user->user_login : $user_id ) );
+        QS_Audit::record_manual_event( '强制注销单会话', sprintf( '强制终结了用户 [%s] 的 1 个活动登录会话。', $user ? $user->user_login : $user_id ) );
 
-        wp_send_json_success( [ 'msg' => '会话已强制下线。' ] );
+        wp_send_json_success( [ 'msg' => '会话已成功终止。' ] );
     }
 
     public static function handle_destroy_user_sessions() {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $user_id          = isset( $_POST['user_id'] ) ? absint( $_POST['user_id'] ) : 0;
         $preserve_current = ! empty( $_POST['preserve_current'] ) && '0' !== (string) wp_unslash( $_POST['preserve_current'] );
 
         if ( ! $user_id ) {
-            wp_send_json_error( '参数无效。' );
+            wp_send_json_error( '请求参数无效。' );
         }
 
         $deleted = QS_Session_Manager::destroy_user_sessions( $user_id, $preserve_current );
@@ -350,13 +674,13 @@ class QS_Ajax {
         $label   = $user ? $user->user_login : $user_id;
 
         QS_Audit::record_manual_event(
-            '踢下线用户全部会话',
-            sprintf( '已清理用户 [%s] 的 %d 个活跃会话%s。', $label, $deleted, $preserve_current ? '（保留当前会话）' : '' )
+            '注销用户全部会话',
+            sprintf( '已清理用户 [%s] 的活动会话，共注销 %d 个会话%s。', $label, $deleted, $preserve_current ? '（已保留当前管理会话）' : '' )
         );
 
         wp_send_json_success(
             [
-                'msg'     => sprintf( '已清理 %d 个会话。', $deleted ),
+                'msg'     => sprintf( '已注销 %d 个会话。', $deleted ),
                 'deleted' => $deleted,
             ]
         );
@@ -366,19 +690,19 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $summary = QS_Session_Manager::destroy_all_sessions_except_current();
 
         QS_Audit::record_manual_event(
             '强制全部用户重新登录',
-            sprintf( '已清理 %d 个用户的 %d 个活跃会话，并保留当前管理员会话。', isset( $summary['users'] ) ? absint( $summary['users'] ) : 0, isset( $summary['sessions'] ) ? absint( $summary['sessions'] ) : 0 )
+            sprintf( '已强制注销 %1$d 位用户的共计 %2$d 个活动登录会话（已保留当前管理会话）。', isset( $summary['users'] ) ? absint( $summary['users'] ) : 0, isset( $summary['sessions'] ) ? absint( $summary['sessions'] ) : 0 )
         );
 
         wp_send_json_success(
             [
-                'msg'      => '已强制其余会话全部失效。',
+                'msg'      => '其他所有用户的登录会话已全部强制失效。',
                 'users'    => isset( $summary['users'] ) ? absint( $summary['users'] ) : 0,
                 'sessions' => isset( $summary['sessions'] ) ? absint( $summary['sessions'] ) : 0,
             ]
@@ -389,14 +713,14 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $ip_address = isset( $_POST['ip_address'] ) ? sanitize_text_field( wp_unslash( $_POST['ip_address'] ) ) : '';
         $ip_address = filter_var( trim( (string) $ip_address ), FILTER_VALIDATE_IP );
 
         if ( ! $ip_address ) {
-            wp_send_json_error( 'IP 参数无效。' );
+            wp_send_json_error( 'IP 地址参数无效。' );
         }
 
         $profile = QS_DB::get_ip_risk_profile( $ip_address );
@@ -409,7 +733,7 @@ class QS_Ajax {
 
         $events = QS_DB::get_ip_risk_events_by_ip( $ip_address, 20 );
         if ( empty( $profile ) && empty( $events ) ) {
-            wp_send_json_error( '该 IP 暂无缓存画像数据，请先触发一次登录事件。' );
+            wp_send_json_error( '暂无该 IP 的画像缓存数据，请先触发相关访问或登录事件。' );
         }
 
         if ( empty( $profile ) && ! empty( $events ) ) {
@@ -529,7 +853,7 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $target = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : 'all';
@@ -540,12 +864,12 @@ class QS_Ajax {
         $summary = QS_DB::clear_ip_risk_data( $target );
         QS_Audit::record_manual_event(
             '清理 IP 风险画像数据',
-            sprintf( '目标[%s]，删除画像缓存 %d 条，删除画像事件 %d 条。', $target, isset( $summary['profiles'] ) ? (int) $summary['profiles'] : 0, isset( $summary['events'] ) ? (int) $summary['events'] : 0 )
+            sprintf( '清理范围 [%s]：已清理 %d 条画像缓存及 %d 条画像事件记录。', $target, isset( $summary['profiles'] ) ? (int) $summary['profiles'] : 0, isset( $summary['events'] ) ? (int) $summary['events'] : 0 )
         );
 
         wp_send_json_success(
             [
-                'msg'     => 'IP 风险画像数据已清理。',
+                'msg'     => 'IP 风险画像数据已清空。',
                 'summary' => $summary,
                 'target'  => $target,
             ]
@@ -556,15 +880,15 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $deleted = QS_Protection::clear_rest_plugin_isolation_monitor_logs();
-        QS_Audit::record_manual_event( '清空路由隔离监控日志', sprintf( '管理员清空路由隔离监控日志，共删除 %d 条。', (int) $deleted ) );
+        QS_Audit::record_manual_event( '清空路由隔离日志', sprintf( '管理员清空了 REST 路由隔离监控日志，共清理 %d 条记录。', (int) $deleted ) );
 
         wp_send_json_success(
             [
-                'msg'     => sprintf( '路由隔离监控日志已清空，共删除 %d 条。', (int) $deleted ),
+                'msg'     => sprintf( 'REST 路由隔离监控日志已清空，共清理 %d 条记录。', (int) $deleted ),
                 'deleted' => (int) $deleted,
             ]
         );
@@ -574,13 +898,13 @@ class QS_Ajax {
         check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
 
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
+            wp_send_json_error( '权限不足，拒绝访问。' );
         }
 
         $ip_address = isset( $_POST['ip_address'] ) ? sanitize_text_field( wp_unslash( $_POST['ip_address'] ) ) : '';
         $ip_address = filter_var( trim( (string) $ip_address ), FILTER_VALIDATE_IP );
         if ( ! $ip_address ) {
-            wp_send_json_error( 'IP 参数无效。' );
+            wp_send_json_error( 'IP 地址参数无效。' );
         }
 
         $delete_events = ! empty( $_POST['delete_events'] );
@@ -588,110 +912,16 @@ class QS_Ajax {
 
         QS_Audit::record_manual_event(
             '删除单个 IP 画像记录',
-            sprintf( 'IP[%s]：删除画像缓存 %d 条，删除画像事件 %d 条。', $ip_address, isset( $summary['profiles'] ) ? (int) $summary['profiles'] : 0, isset( $summary['events'] ) ? (int) $summary['events'] : 0 )
+            sprintf( '目标 IP [%s]：已清理 %d 条画像缓存及 %d 条画像事件记录。', $ip_address, isset( $summary['profiles'] ) ? (int) $summary['profiles'] : 0, isset( $summary['events'] ) ? (int) $summary['events'] : 0 )
         );
 
         wp_send_json_success(
             [
-                'msg'       => '该 IP 画像记录已删除。',
+                'msg'       => '该 IP 画像记录已成功删除。',
                 'summary'   => $summary,
                 'ip_address' => $ip_address,
             ]
         );
-    }
-
-    public static function handle_domain_replace() {
-        check_ajax_referer( 'qs_ajax_nonce', 'nonce' );
-
-        if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( 'Permission denied.' );
-        }
-
-        if ( ! class_exists( 'QS_Domain_Replace' ) ) {
-            wp_send_json_error( 'Domain replace class missing.' );
-        }
-
-        $old  = isset( $_POST['old_domain'] ) ? sanitize_text_field( wp_unslash( $_POST['old_domain'] ) ) : '';
-        $new  = isset( $_POST['new_domain'] ) ? sanitize_text_field( wp_unslash( $_POST['new_domain'] ) ) : '';
-        $target_key = isset( $_POST['target'] ) ? sanitize_key( wp_unslash( $_POST['target'] ) ) : '';
-        $last_id = isset( $_POST['last_id'] ) ? absint( $_POST['last_id'] ) : 0;
-        $limit   = isset( $_POST['limit'] ) ? absint( $_POST['limit'] ) : 200;
-        $dry_run = ! empty( $_POST['dry_run'] );
-        $include_protocols = empty( $_POST['include_protocols'] ) ? false : true;
-        $log_step = ! empty( $_POST['log'] );
-
-        if ( '' === $old || '' === $new ) {
-            wp_send_json_error( '请输入旧域名和新域名。' );
-        }
-
-        $target = QS_Domain_Replace::get_target( $target_key );
-        if ( ! $target ) {
-            wp_send_json_error( '无效的替换范围。' );
-        }
-
-        $pairs = QS_Domain_Replace::build_search_pairs( $old, $new, $include_protocols );
-        if ( empty( $pairs['search'] ) ) {
-            wp_send_json_error( '替换规则为空，请检查输入。' );
-        }
-
-        $stats = QS_Domain_Replace::replace_in_target(
-            $target,
-            $pairs['search'],
-            $pairs['replace'],
-            $last_id,
-            $limit,
-            $dry_run,
-            $pairs['needle']
-        );
-
-        if ( isset( $stats['error'] ) ) {
-            wp_send_json_error( $stats['error'] );
-        }
-
-        if ( ! $dry_run && $log_step ) {
-            $detail = sprintf(
-                '已执行域名安全替换：旧 [%s] -> 新 [%s]；本轮累计扫描 %d 行，更新 %d 行。',
-                $old,
-                $new,
-                (int) $stats['scanned'],
-                (int) $stats['updated']
-            );
-            if ( class_exists( 'QS_Audit' ) ) {
-                QS_Audit::record_manual_event( '域名安全替换', $detail );
-            }
-        }
-
-        if ( ! $dry_run && ! empty( $stats['updated'] ) ) {
-            self::maybe_refresh_qilingshop_domain_replace_cache( $target_key );
-            self::maybe_refresh_qibbs_domain_replace_cache( $target_key );
-        }
-
-        wp_send_json_success( $stats );
-    }
-
-    private static function maybe_refresh_qilingshop_domain_replace_cache( $target_key ) {
-        $target_key = sanitize_key( (string) $target_key );
-        if ( 0 !== strpos( $target_key, 'qilingshop_' ) ) {
-            return;
-        }
-
-        $new_version = sprintf( '%.0f', microtime( true ) * 1000000 ) . '-' . wp_rand( 1000, 9999 );
-        update_option( 'qls_shop_product_cache_version', $new_version );
-        update_option( 'qls_shop_category_cache_version', $new_version );
-    }
-
-    private static function maybe_refresh_qibbs_domain_replace_cache( $target_key ) {
-        $target_key = sanitize_key( (string) $target_key );
-        if ( 0 !== strpos( $target_key, 'qibbs_' ) ) {
-            return;
-        }
-
-        if ( class_exists( 'Qibbs_Cache_Service' ) ) {
-            Qibbs_Cache_Service::invalidate_all();
-        }
-
-        $new_version = sprintf( '%.0f', microtime( true ) * 1000000 ) . '-' . wp_rand( 1000, 9999 );
-        update_option( 'qibbs_cache_version', $new_version );
     }
 
     private static function sanitize_ip_risk_provider_details( $providers ) {
@@ -779,23 +1009,20 @@ class QS_Ajax {
     private static function get_ip_risk_provider_label( $provider_id ) {
         $provider_id = sanitize_key( (string) $provider_id );
         $map         = [
-            'ipregistry' => 'IPRegistry',
-            'ipdata'     => 'IPData',
-            'ip_api'     => 'IP-API',
-            'ipinfo'     => 'IPinfo',
-            'ip_sb'      => 'IP.SB',
-            'ipbset'     => 'IPBSET (即时数科)',
+            'ipdata' => 'IPData',
+            'ip_api' => 'IP-API',
+            'ipinfo' => 'IPinfo',
         ];
 
         return isset( $map[ $provider_id ] ) ? $map[ $provider_id ] : ( '' !== $provider_id ? strtoupper( $provider_id ) : 'Unknown' );
     }
 
     private static function get_supported_ip_risk_provider_ids() {
-        return [ 'ipregistry', 'ipdata', 'ip_api', 'ipinfo', 'ip_sb', 'ipbset' ];
+        return [ 'ipdata', 'ip_api', 'ipinfo' ];
     }
 
     private static function get_ip_risk_key_required_provider_ids() {
-        return [ 'ipregistry', 'ipdata', 'ipbset' ];
+        return [ 'ipdata' ];
     }
 
     private static function build_ip_risk_provider_sections( $provider_id, $data ) {
@@ -804,47 +1031,6 @@ class QS_Ajax {
         $sections    = [];
 
         switch ( $provider_id ) {
-            case 'ipregistry':
-                $location = isset( $data['location'] ) && is_array( $data['location'] ) ? $data['location'] : [];
-                $country  = isset( $location['country'] ) && is_array( $location['country'] ) ? $location['country'] : [];
-                $region   = isset( $location['region'] ) && is_array( $location['region'] ) ? $location['region'] : [];
-                $city     = isset( $location['city'] ) && is_array( $location['city'] ) ? $location['city'] : [];
-                $tz       = isset( $location['time_zone'] ) && is_array( $location['time_zone'] ) ? $location['time_zone'] : [];
-                $conn     = isset( $data['connection'] ) && is_array( $data['connection'] ) ? $data['connection'] : [];
-                $security = isset( $data['security'] ) && is_array( $data['security'] ) ? $data['security'] : [];
-
-                $sections[] = self::build_ip_risk_section(
-                    '位置',
-                    [
-                        [ 'label' => 'IP', 'value' => isset( $data['ip'] ) ? $data['ip'] : '' ],
-                        [ 'label' => '国家/地区', 'value' => isset( $country['name'] ) ? $country['name'] : '' ],
-                        [ 'label' => '国家代码', 'value' => isset( $country['code'] ) ? $country['code'] : '' ],
-                        [ 'label' => '省州', 'value' => isset( $region['name'] ) ? $region['name'] : '' ],
-                        [ 'label' => '城市', 'value' => isset( $city['name'] ) ? $city['name'] : '' ],
-                        [ 'label' => '时区', 'value' => isset( $tz['id'] ) ? $tz['id'] : '' ],
-                    ]
-                );
-                $sections[] = self::build_ip_risk_section(
-                    '网络',
-                    [
-                        [ 'label' => '连接类型', 'value' => isset( $conn['type'] ) ? $conn['type'] : '' ],
-                        [ 'label' => 'ASN', 'value' => isset( $conn['asn'] ) ? $conn['asn'] : '' ],
-                        [ 'label' => '运营商', 'value' => isset( $conn['organization'] ) ? $conn['organization'] : '' ],
-                        [ 'label' => 'ISP', 'value' => isset( $conn['isp'] ) ? $conn['isp'] : '' ],
-                    ]
-                );
-                $sections[] = self::build_ip_risk_section(
-                    '安全',
-                    [
-                        [ 'label' => '代理', 'value' => self::format_ip_risk_bool( isset( $security['is_proxy'] ) ? $security['is_proxy'] : null ) ],
-                        [ 'label' => 'Tor', 'value' => self::format_ip_risk_bool( isset( $security['is_tor'] ) ? $security['is_tor'] : null ) ],
-                        [ 'label' => '匿名', 'value' => self::format_ip_risk_bool( isset( $security['is_anonymous'] ) ? $security['is_anonymous'] : null ) ],
-                        [ 'label' => '滥用者', 'value' => self::format_ip_risk_bool( isset( $security['is_abuser'] ) ? $security['is_abuser'] : null ) ],
-                        [ 'label' => '攻击者', 'value' => self::format_ip_risk_bool( isset( $security['is_attacker'] ) ? $security['is_attacker'] : null ) ],
-                    ]
-                );
-                break;
-
             case 'ipdata':
                 $asn    = isset( $data['asn'] ) && is_array( $data['asn'] ) ? $data['asn'] : [];
                 $threat = isset( $data['threat'] ) && is_array( $data['threat'] ) ? $data['threat'] : [];
@@ -857,7 +1043,7 @@ class QS_Ajax {
                         [ 'label' => '国家代码', 'value' => isset( $data['country_code'] ) ? $data['country_code'] : '' ],
                         [ 'label' => '省州', 'value' => isset( $data['region'] ) ? $data['region'] : '' ],
                         [ 'label' => '城市', 'value' => isset( $data['city'] ) ? $data['city'] : '' ],
-                        [ 'label' => '经纬度', 'value' => self::format_ip_risk_latlng( isset( $data['latitude'] ) ? $data['latitude'] : '', isset( $data['longitude'] ) ? $data['longitude'] : '' ) ],
+                        [ 'label' => 'Lat/Lng', 'value' => self::format_ip_risk_latlng( isset( $data['latitude'] ) ? $data['latitude'] : '', isset( $data['longitude'] ) ? $data['longitude'] : '' ) ],
                     ]
                 );
                 $sections[] = self::build_ip_risk_section(
@@ -866,7 +1052,7 @@ class QS_Ajax {
                         [ 'label' => 'ASN', 'value' => isset( $asn['asn'] ) ? $asn['asn'] : '' ],
                         [ 'label' => '网络', 'value' => isset( $asn['route'] ) ? $asn['route'] : '' ],
                         [ 'label' => '类型', 'value' => isset( $asn['type'] ) ? $asn['type'] : '' ],
-                        [ 'label' => '运营商', 'value' => isset( $asn['name'] ) ? $asn['name'] : '' ],
+                        [ 'label' => 'Organization', 'value' => isset( $asn['name'] ) ? $asn['name'] : '' ],
                         [ 'label' => '域名', 'value' => isset( $asn['domain'] ) ? $asn['domain'] : '' ],
                     ]
                 );
@@ -877,8 +1063,8 @@ class QS_Ajax {
                         [ 'label' => 'Tor', 'value' => self::format_ip_risk_bool( isset( $threat['is_tor'] ) ? $threat['is_tor'] : null ) ],
                         [ 'label' => '匿名', 'value' => self::format_ip_risk_bool( isset( $threat['is_anonymous'] ) ? $threat['is_anonymous'] : null ) ],
                         [ 'label' => '数据中心', 'value' => self::format_ip_risk_bool( isset( $threat['is_datacenter'] ) ? $threat['is_datacenter'] : null ) ],
-                        [ 'label' => '已知攻击者', 'value' => self::format_ip_risk_bool( isset( $threat['is_known_attacker'] ) ? $threat['is_known_attacker'] : null ) ],
-                        [ 'label' => '已知滥用者', 'value' => self::format_ip_risk_bool( isset( $threat['is_known_abuser'] ) ? $threat['is_known_abuser'] : null ) ],
+                        [ 'label' => 'Known attacker', 'value' => self::format_ip_risk_bool( isset( $threat['is_known_attacker'] ) ? $threat['is_known_attacker'] : null ) ],
+                        [ 'label' => 'Known abuser', 'value' => self::format_ip_risk_bool( isset( $threat['is_known_abuser'] ) ? $threat['is_known_abuser'] : null ) ],
                     ]
                 );
                 break;
@@ -887,20 +1073,20 @@ class QS_Ajax {
                 $sections[] = self::build_ip_risk_section(
                     '位置',
                     [
-                        [ 'label' => '洲', 'value' => isset( $data['continent'] ) ? $data['continent'] : '' ],
+                        [ 'label' => 'Continent', 'value' => isset( $data['continent'] ) ? $data['continent'] : '' ],
                         [ 'label' => '国家/地区', 'value' => isset( $data['country'] ) ? $data['country'] : '' ],
                         [ 'label' => '国家代码', 'value' => isset( $data['countryCode'] ) ? $data['countryCode'] : '' ],
                         [ 'label' => '省州', 'value' => isset( $data['regionName'] ) ? $data['regionName'] : '' ],
                         [ 'label' => '省州代码', 'value' => isset( $data['region'] ) ? $data['region'] : '' ],
                         [ 'label' => '城市', 'value' => isset( $data['city'] ) ? $data['city'] : '' ],
                         [ 'label' => '邮编', 'value' => isset( $data['zip'] ) ? $data['zip'] : '' ],
-                        [ 'label' => '经纬度', 'value' => self::format_ip_risk_latlng( isset( $data['lat'] ) ? $data['lat'] : '', isset( $data['lon'] ) ? $data['lon'] : '' ) ],
+                        [ 'label' => 'Lat/Lng', 'value' => self::format_ip_risk_latlng( isset( $data['lat'] ) ? $data['lat'] : '', isset( $data['lon'] ) ? $data['lon'] : '' ) ],
                     ]
                 );
                 $sections[] = self::build_ip_risk_section(
                     '网络',
                     [
-                        [ 'label' => '运营商', 'value' => isset( $data['org'] ) ? $data['org'] : '' ],
+                        [ 'label' => 'Organization', 'value' => isset( $data['org'] ) ? $data['org'] : '' ],
                         [ 'label' => 'ISP', 'value' => isset( $data['isp'] ) ? $data['isp'] : '' ],
                         [ 'label' => '时区', 'value' => isset( $data['timezone'] ) ? $data['timezone'] : '' ],
                     ]
@@ -939,19 +1125,19 @@ class QS_Ajax {
                         [ 'label' => 'IP', 'value' => isset( $data['ip'] ) ? $data['ip'] : '' ],
                         [ 'label' => '国家/地区', 'value' => isset( $data['country'] ) ? $data['country'] : '' ],
                         [ 'label' => '国家代码', 'value' => isset( $data['country_code'] ) ? $data['country_code'] : '' ],
-                        [ 'label' => '洲', 'value' => isset( $data['continent'] ) ? $data['continent'] : '' ],
-                        [ 'label' => '洲代码', 'value' => isset( $data['continent_code'] ) ? $data['continent_code'] : '' ],
+                        [ 'label' => 'Continent', 'value' => isset( $data['continent'] ) ? $data['continent'] : '' ],
+                        [ 'label' => 'Continent code', 'value' => isset( $data['continent_code'] ) ? $data['continent_code'] : '' ],
                         [ 'label' => '省州', 'value' => isset( $data['region'] ) ? $data['region'] : '' ],
                         [ 'label' => '城市', 'value' => isset( $data['city'] ) ? $data['city'] : '' ],
                         [ 'label' => '时区', 'value' => isset( $data['timezone'] ) ? $data['timezone'] : '' ],
-                        [ 'label' => '经纬度', 'value' => isset( $data['loc'] ) ? $data['loc'] : '' ],
+                        [ 'label' => 'Lat/Lng', 'value' => isset( $data['loc'] ) ? $data['loc'] : '' ],
                     ]
                 );
                 $sections[] = self::build_ip_risk_section(
                     '网络',
                     [
                         [ 'label' => 'ASN', 'value' => $asn_id ],
-                        [ 'label' => '运营商', 'value' => $asn_name ],
+                        [ 'label' => 'Organization', 'value' => $asn_name ],
                         [ 'label' => '域名', 'value' => $asn_domain ],
                         [ 'label' => '类型', 'value' => isset( $asn['type'] ) ? $asn['type'] : '' ],
                     ]
@@ -968,54 +1154,6 @@ class QS_Ajax {
                 );
                 break;
 
-            case 'ip_sb':
-                $sections[] = self::build_ip_risk_section(
-                    '位置',
-                    [
-                        [ 'label' => 'IP', 'value' => isset( $data['ip'] ) ? $data['ip'] : '' ],
-                        [ 'label' => '国家/地区', 'value' => isset( $data['country'] ) ? $data['country'] : '' ],
-                        [ 'label' => '省州', 'value' => isset( $data['region'] ) ? $data['region'] : '' ],
-                        [ 'label' => '城市', 'value' => isset( $data['city'] ) ? $data['city'] : '' ],
-                        [ 'label' => '时区', 'value' => isset( $data['timezone'] ) ? $data['timezone'] : '' ],
-                    ]
-                );
-                $sections[] = self::build_ip_risk_section(
-                    '网络',
-                    [
-                        [ 'label' => 'ASN', 'value' => isset( $data['asn'] ) ? $data['asn'] : '' ],
-                        [ 'label' => '运营商', 'value' => isset( $data['asn_organization'] ) ? $data['asn_organization'] : '' ],
-                        [ 'label' => '组织', 'value' => isset( $data['organization'] ) ? $data['organization'] : '' ],
-                        [ 'label' => 'ISP', 'value' => isset( $data['isp'] ) ? $data['isp'] : '' ],
-                        [ 'label' => '网络类型', 'value' => isset( $data['type'] ) ? $data['type'] : '' ],
-                    ]
-                );
-                break;
-
-            case 'ipbset':
-                $sections[] = self::build_ip_risk_section(
-                    '位置',
-                    [
-                        [ 'label' => 'IP', 'value' => isset( $data['ipAddress'] ) ? $data['ipAddress'] : '' ],
-                    ]
-                );
-                $sections[] = self::build_ip_risk_section(
-                    '评估',
-                    [
-                        [ 'label' => '风险评分', 'value' => isset( $data['score'] ) ? $data['score'] : '' ],
-                        [ 'label' => '风险等级', 'value' => isset( $data['level'] ) ? $data['level'] : '' ],
-                    ]
-                );
-                $sections[] = self::build_ip_risk_section(
-                    '安全详情',
-                    [
-                        [ 'label' => '代理', 'value' => self::format_ip_risk_bool( isset( $data['proxy'] ) ? $data['proxy'] : ( isset( $data['isProxy'] ) ? $data['isProxy'] : null ) ) ],
-                        [ 'label' => 'Tor', 'value' => self::format_ip_risk_bool( isset( $data['tor'] ) ? $data['tor'] : null ) ],
-                        [ 'label' => 'VPN', 'value' => self::format_ip_risk_bool( isset( $data['vpn'] ) ? $data['vpn'] : null ) ],
-                        [ 'label' => 'IDC', 'value' => self::format_ip_risk_bool( isset( $data['idc'] ) ? $data['idc'] : null ) ],
-                        [ 'label' => '滥用', 'value' => self::format_ip_risk_bool( isset( $data['bot'] ) ? $data['bot'] : ( isset( $data['spam'] ) ? $data['spam'] : null ) ) ],
-                    ]
-                );
-                break;
         }
 
         $sections = array_values(
@@ -1051,17 +1189,6 @@ class QS_Ajax {
         }
 
         switch ( $provider_id ) {
-            case 'ipregistry':
-                $security = isset( $data['security'] ) && is_array( $data['security'] ) ? $data['security'] : [];
-                self::append_ip_risk_bool_highlight( $items, 'VPN', isset( $security['is_vpn'] ) ? $security['is_vpn'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, 'Tor', isset( $security['is_tor'] ) ? $security['is_tor'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '代理', isset( $security['is_proxy'] ) ? $security['is_proxy'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '匿名', isset( $security['is_anonymous'] ) ? $security['is_anonymous'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '数据中心', isset( $security['is_cloud_provider'] ) ? $security['is_cloud_provider'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '攻击者', isset( $security['is_attacker'] ) ? $security['is_attacker'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '滥用者', isset( $security['is_abuser'] ) ? $security['is_abuser'] : null, true );
-                break;
-
             case 'ipdata':
                 $threat = isset( $data['threat'] ) && is_array( $data['threat'] ) ? $data['threat'] : [];
                 self::append_ip_risk_bool_highlight( $items, 'VPN', isset( $threat['is_vpn'] ) ? $threat['is_vpn'] : null, true );
@@ -1069,12 +1196,12 @@ class QS_Ajax {
                 self::append_ip_risk_bool_highlight( $items, '代理', isset( $threat['is_proxy'] ) ? $threat['is_proxy'] : null, true );
                 self::append_ip_risk_bool_highlight( $items, '匿名', isset( $threat['is_anonymous'] ) ? $threat['is_anonymous'] : null, true );
                 self::append_ip_risk_bool_highlight( $items, '数据中心', isset( $threat['is_datacenter'] ) ? $threat['is_datacenter'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '攻击者', isset( $threat['is_known_attacker'] ) ? $threat['is_known_attacker'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '滥用者', isset( $threat['is_known_abuser'] ) ? $threat['is_known_abuser'] : null, true );
+                self::append_ip_risk_bool_highlight( $items, 'Attacker', isset( $threat['is_known_attacker'] ) ? $threat['is_known_attacker'] : null, true );
+                self::append_ip_risk_bool_highlight( $items, 'Abuser', isset( $threat['is_known_abuser'] ) ? $threat['is_known_abuser'] : null, true );
                 break;
 
             case 'ip_api':
-                // Geolocation fields only, anonymity fields removed due to timeout issues on free endpoint
+                // ip-api 免费接口仅展示地理字段，匿名字段不参与高亮。
                 break;
 
             case 'ipinfo':
@@ -1086,24 +1213,6 @@ class QS_Ajax {
                 self::append_ip_risk_bool_highlight( $items, 'Bogon', isset( $data['bogon'] ) ? $data['bogon'] : null, true );
                 break;
 
-            case 'ip_sb':
-                $type = isset( $data['type'] ) ? strtolower( trim( (string) $data['type'] ) ) : '';
-                if ( '' !== $type ) {
-                    $items[] = [
-                        'label' => '网络类型',
-                        'state' => 'info',
-                        'value' => sanitize_text_field( (string) $data['type'] ),
-                    ];
-                }
-                break;
-
-            case 'ipbset':
-                self::append_ip_risk_bool_highlight( $items, 'VPN', isset( $data['vpn'] ) ? $data['vpn'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, 'Tor', isset( $data['tor'] ) ? $data['tor'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '代理', isset( $data['proxy'] ) ? $data['proxy'] : ( isset( $data['isProxy'] ) ? $data['isProxy'] : null ), true );
-                self::append_ip_risk_bool_highlight( $items, 'IDC', isset( $data['idc'] ) ? $data['idc'] : null, true );
-                self::append_ip_risk_bool_highlight( $items, '滥用', isset( $data['bot'] ) ? $data['bot'] : ( isset( $data['spam'] ) ? $data['spam'] : null ), true );
-                break;
         }
 
         foreach ( $signals as $signal ) {
@@ -1131,23 +1240,23 @@ class QS_Ajax {
         return array_slice( $items, 0, 16 );
     }
 
-    private static function append_ip_risk_bool_highlight( &$items, $label, $value, $risky = true, $positive_label = '未命中' ) {
+    private static function append_ip_risk_bool_highlight( &$items, $label, $value, $risky = true, $positive_label = 'Yes' ) {
         $state = self::parse_ip_risk_boolean( $value );
         if ( 'unknown' === $state ) {
             return;
         }
 
         $tone  = 'neutral';
-        $text  = '未知';
+        $text  = 'Unknown';
         $label = sanitize_text_field( (string) $label );
         $positive_label = sanitize_text_field( (string) $positive_label );
 
         if ( 'true' === $state ) {
             $tone = $risky ? 'danger' : 'info';
-            $text = $risky ? '命中' : $positive_label;
+            $text = $risky ? 'Matched' : $positive_label;
         } elseif ( 'false' === $state ) {
             $tone = $risky ? 'ok' : 'neutral';
-            $text = $risky ? '未命中' : '否';
+            $text = $risky ? 'Not matched' : 'No';
         }
 
         $items[] = [
@@ -1172,10 +1281,10 @@ class QS_Ajax {
 
         if ( is_string( $value ) ) {
             $value = strtolower( trim( $value ) );
-            if ( in_array( $value, [ '1', 'true', 'yes', 'y', 'on', '是' ], true ) ) {
+            if ( in_array( $value, [ '1', 'true', 'yes', 'y', 'on' ], true ) ) {
                 return 'true';
             }
-            if ( in_array( $value, [ '0', 'false', 'no', 'n', 'off', '否' ], true ) ) {
+            if ( in_array( $value, [ '0', 'false', 'no', 'n', 'off' ], true ) ) {
                 return 'false';
             }
         }
@@ -1211,7 +1320,7 @@ class QS_Ajax {
 
     private static function normalize_ip_risk_value( $value ) {
         if ( is_bool( $value ) ) {
-            return $value ? '是' : '否';
+            return $value ? 'Yes' : 'No';
         }
 
         if ( is_numeric( $value ) ) {
@@ -1251,11 +1360,11 @@ class QS_Ajax {
         }
 
         if ( is_bool( $value ) ) {
-            return $value ? '是' : '否';
+            return $value ? 'Yes' : 'No';
         }
 
         if ( is_numeric( $value ) ) {
-            return (int) $value > 0 ? '是' : '否';
+            return (int) $value > 0 ? 'Yes' : 'No';
         }
 
         $value = strtolower( trim( (string) $value ) );
@@ -1264,10 +1373,10 @@ class QS_Ajax {
         }
 
         if ( in_array( $value, [ '1', 'true', 'yes', 'y', 'on' ], true ) ) {
-            return '是';
+            return 'Yes';
         }
         if ( in_array( $value, [ '0', 'false', 'no', 'n', 'off' ], true ) ) {
-            return '否';
+            return 'No';
         }
 
         return sanitize_text_field( (string) $value );

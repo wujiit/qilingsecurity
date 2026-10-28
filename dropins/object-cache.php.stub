@@ -1,0 +1,985 @@
+<?php
+/**
+ * __QS_REDIS_SIGNATURE__
+ * 生成时间: __QS_REDIS_GENERATED_AT__
+ */
+
+if ( ! class_exists( 'WP_Object_Cache' ) ) {
+    class WP_Object_Cache {
+
+        private $cache = array();
+        private $global_groups = array();
+        private $non_persistent_groups = array();
+        private $blog_scope = 'blog:0';
+        private $cache_hits = 0;
+        private $cache_misses = 0;
+        private $redis = null;
+        private $redis_available = false;
+        private $key_prefix = '';
+        private $group_registry_key = '';
+        private $config = array();
+
+        public function __construct() {
+            $this->config = array(
+                'host'     => __QS_REDIS_HOST__,
+                'username' => __QS_REDIS_USERNAME__,
+                'port'     => __QS_REDIS_PORT__,
+                'password' => __QS_REDIS_PASSWORD__,
+                'database' => __QS_REDIS_DATABASE__,
+                'prefix'   => __QS_REDIS_PREFIX__,
+            );
+            $this->key_prefix         = $this->build_key_prefix();
+            $this->group_registry_key = $this->key_prefix . 'index:groups';
+            $this->blog_scope         = $this->get_current_blog_scope();
+            $this->global_groups      = array_fill_keys( $this->get_default_global_groups(), true );
+            $this->connect();
+        }
+
+        public function add( $key, $data, $group = 'default', $expire = 0 ) {
+            $group      = $this->normalize_group( $group );
+            $string_key = (string) $key;
+            $found      = false;
+            $this->get( $string_key, $group, false, $found );
+
+            if ( $found ) {
+                return false;
+            }
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available ) {
+                return $this->set( $string_key, $data, $group, (int) $expire );
+            }
+
+            $redis_key = $this->build_data_key( $string_key, $group );
+            $payload   = $this->encode_payload( $data );
+
+            try {
+                $added = (bool) $this->redis->setnx( $redis_key, $payload );
+
+                if ( ! $added ) {
+                    $this->get( $string_key, $group, true, $found );
+
+                    return false;
+                }
+
+                if ( (int) $expire > 0 ) {
+                    $this->redis->expire( $redis_key, max( 1, (int) $expire ) );
+                }
+
+                $this->remember_runtime_value( $group, $string_key, $data );
+                $this->register_persistent_key( $redis_key, $group );
+
+                return true;
+            } catch ( Exception $e ) {
+                return false;
+            }
+        }
+
+        public function add_multiple( $data, $group = 'default', $expire = 0 ) {
+            $results = array();
+
+            foreach ( (array) $data as $key => $value ) {
+                $results[ $key ] = $this->add( $key, $value, $group, $expire );
+            }
+
+            return $results;
+        }
+
+        public function replace( $key, $data, $group = 'default', $expire = 0 ) {
+            $group      = $this->normalize_group( $group );
+            $string_key = (string) $key;
+            $found      = false;
+            $this->get( $string_key, $group, false, $found );
+
+            if ( ! $found ) {
+                return false;
+            }
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available ) {
+                return $this->set( $string_key, $data, $group, (int) $expire );
+            }
+
+            $ttl = (int) $expire;
+            if ( $ttl <= 0 ) {
+                $ttl = $this->get_persistent_ttl( $this->build_data_key( $string_key, $group ) );
+            }
+
+            return $this->set( $string_key, $data, $group, $ttl );
+        }
+
+        public function set( $key, $data, $group = 'default', $expire = 0 ) {
+            $group      = $this->normalize_group( $group );
+            $string_key = (string) $key;
+
+            $this->remember_runtime_value( $group, $string_key, $data );
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available ) {
+                return true;
+            }
+
+            $redis_key = $this->build_data_key( $string_key, $group );
+
+            return $this->persist_payload( $redis_key, $group, $this->encode_payload( $data ), (int) $expire );
+        }
+
+        public function set_multiple( $data, $group = 'default', $expire = 0 ) {
+            $results = array();
+
+            foreach ( (array) $data as $key => $value ) {
+                $results[ $key ] = $this->set( $key, $value, $group, $expire );
+            }
+
+            return $results;
+        }
+
+        public function get( $key, $group = 'default', $force = false, &$found = null ) {
+            $group       = $this->normalize_group( $group );
+            $runtime_key = $this->get_runtime_group_key( $group );
+            $string_key  = (string) $key;
+
+            if ( ! $force && isset( $this->cache[ $runtime_key ] ) && array_key_exists( $string_key, $this->cache[ $runtime_key ] ) ) {
+                $found = ! empty( $this->cache[ $runtime_key ][ $string_key ]['found'] );
+
+                if ( $found ) {
+                    ++$this->cache_hits;
+
+                    return $this->cache[ $runtime_key ][ $string_key ]['value'];
+                }
+            }
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available ) {
+                $found = false;
+                ++$this->cache_misses;
+
+                return false;
+            }
+
+            $redis_key = $this->build_data_key( $string_key, $group );
+            $payload   = false;
+
+            try {
+                $payload = $this->redis->get( $redis_key );
+            } catch ( Exception $e ) {
+                $payload = false;
+            }
+
+            if ( false === $payload ) {
+                $found = false;
+                ++$this->cache_misses;
+
+                return false;
+            }
+
+            $decoded = $this->decode_payload( $payload );
+            if ( ! is_array( $decoded ) || ! array_key_exists( 'value', $decoded ) ) {
+                $found = false;
+                ++$this->cache_misses;
+
+                return false;
+            }
+
+            if ( ! isset( $this->cache[ $runtime_key ] ) ) {
+                $this->cache[ $runtime_key ] = array();
+            }
+
+            $this->cache[ $runtime_key ][ $string_key ] = array(
+                'value' => $decoded['value'],
+                'found' => true,
+            );
+
+            $found = true;
+            ++$this->cache_hits;
+
+            return $decoded['value'];
+        }
+
+        public function get_multiple( $keys, $group = 'default', $force = false ) {
+            $group       = $this->normalize_group( $group );
+            $runtime_key = $this->get_runtime_group_key( $group );
+            $results     = array();
+            $pending     = array();
+
+            foreach ( (array) $keys as $key ) {
+                $string_key = (string) $key;
+                $results[ $key ] = false;
+
+                if ( ! $force && isset( $this->cache[ $runtime_key ] ) && array_key_exists( $string_key, $this->cache[ $runtime_key ] ) ) {
+                    if ( ! empty( $this->cache[ $runtime_key ][ $string_key ]['found'] ) ) {
+                        ++$this->cache_hits;
+                        $results[ $key ] = $this->cache[ $runtime_key ][ $string_key ]['value'];
+                        continue;
+                    }
+                }
+
+                $pending[ $key ] = $string_key;
+            }
+
+            if ( empty( $pending ) ) {
+                return $results;
+            }
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available ) {
+                foreach ( $pending as $original_key => $string_key ) {
+                    unset( $string_key );
+                    ++$this->cache_misses;
+                    $results[ $original_key ] = false;
+                }
+
+                return $results;
+            }
+
+            $ordered_keys = array_keys( $pending );
+            $redis_keys   = array();
+
+            foreach ( $ordered_keys as $original_key ) {
+                $redis_keys[] = $this->build_data_key( $pending[ $original_key ], $group );
+            }
+
+            try {
+                $payloads = method_exists( $this->redis, 'mGet' ) ? $this->redis->mGet( $redis_keys ) : array();
+            } catch ( Exception $e ) {
+                $payloads = array();
+            }
+
+            if ( ! is_array( $payloads ) || count( $payloads ) !== count( $ordered_keys ) ) {
+                foreach ( $pending as $original_key => $string_key ) {
+                    $found = false;
+                    $results[ $original_key ] = $this->get( $string_key, $group, true, $found );
+                }
+
+                return $results;
+            }
+
+            foreach ( $ordered_keys as $index => $original_key ) {
+                $string_key = $pending[ $original_key ];
+                $payload    = $payloads[ $index ];
+
+                if ( false === $payload ) {
+                    ++$this->cache_misses;
+                    $results[ $original_key ] = false;
+                    continue;
+                }
+
+                $decoded = $this->decode_payload( $payload );
+                if ( ! is_array( $decoded ) || ! array_key_exists( 'value', $decoded ) ) {
+                    ++$this->cache_misses;
+                    $results[ $original_key ] = false;
+                    continue;
+                }
+
+                $this->remember_runtime_value( $group, $string_key, $decoded['value'] );
+                ++$this->cache_hits;
+                $results[ $original_key ] = $decoded['value'];
+            }
+
+            return $results;
+        }
+
+        public function delete( $key, $group = 'default', $deprecated = false ) {
+            $group       = $this->normalize_group( $group );
+            $string_key  = (string) $key;
+
+            $this->forget_runtime_value( $group, $string_key );
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available ) {
+                return true;
+            }
+
+            $redis_key = $this->build_data_key( $string_key, $group );
+
+            try {
+                $deleted = $this->redis->del( $redis_key );
+                $this->unregister_persistent_key( $redis_key, $group );
+
+                return false !== $deleted;
+            } catch ( Exception $e ) {
+                return false;
+            }
+        }
+
+        public function delete_multiple( $keys, $group = 'default' ) {
+            $group      = $this->normalize_group( $group );
+            $results    = array();
+            $redis_keys = array();
+
+            foreach ( (array) $keys as $key ) {
+                $string_key      = (string) $key;
+                $results[ $key ] = true;
+                $this->forget_runtime_value( $group, $string_key );
+
+                if ( ! $this->is_non_persistent_group( $group ) && $this->redis_available ) {
+                    $redis_keys[ $string_key ] = $this->build_data_key( $string_key, $group );
+                }
+            }
+
+            if ( $this->is_non_persistent_group( $group ) || ! $this->redis_available || empty( $redis_keys ) ) {
+                return $results;
+            }
+
+            try {
+                call_user_func_array( array( $this->redis, 'del' ), array_values( $redis_keys ) );
+
+                foreach ( $redis_keys as $string_key => $redis_key ) {
+                    $this->unregister_persistent_key( $redis_key, $group );
+                }
+            } catch ( Exception $e ) {
+                foreach ( array_keys( $results ) as $original_key ) {
+                    $results[ $original_key ] = false;
+                }
+            }
+
+            return $results;
+        }
+
+        public function incr( $key, $offset = 1, $group = 'default' ) {
+            $group = $this->normalize_group( $group );
+            $found = false;
+            $value = $this->get( $key, $group, false, $found );
+
+            if ( ! $found || ! is_numeric( $value ) ) {
+                return false;
+            }
+
+            $value = (int) $value + (int) $offset;
+            $ttl   = 0;
+
+            if ( ! $this->is_non_persistent_group( $group ) && $this->redis_available ) {
+                $ttl = $this->get_persistent_ttl( $this->build_data_key( (string) $key, $group ) );
+            }
+
+            $this->set( $key, $value, $group, $ttl );
+
+            return $value;
+        }
+
+        public function decr( $key, $offset = 1, $group = 'default' ) {
+            $value = $this->incr( $key, 0 - (int) $offset, $group );
+
+            if ( false === $value ) {
+                return false;
+            }
+
+            if ( $value < 0 ) {
+                $value = 0;
+                $this->set( $key, $value, $group, $this->get_persistent_ttl( $this->build_data_key( (string) $key, $this->normalize_group( $group ) ) ) );
+            }
+
+            return $value;
+        }
+
+        public function flush() {
+            $this->cache = array();
+
+            if ( ! $this->redis_available ) {
+                return true;
+            }
+
+            try {
+                // 1. 优先按站点专属前缀进行 SCAN 流式批处理删除（避免遍历集合导致 OOM）
+                $flushed = $this->flush_by_prefix( $this->key_prefix );
+
+                // 2. 如果前缀流式删除因异常未能完成，降级回退到分组索引流式清理
+                if ( ! $flushed ) {
+                    $groups = $this->redis->sMembers( $this->group_registry_key );
+                    if ( is_array( $groups ) ) {
+                        foreach ( $groups as $index_key ) {
+                            $this->flush_index_key( $index_key );
+                        }
+                    }
+                    $this->redis->del( $this->group_registry_key );
+                }
+            } catch ( Exception $e ) {
+                return false;
+            }
+
+            return true;
+        }
+
+        public function flush_group( $group ) {
+            $group = $this->normalize_group( $group );
+            $runtime_group = $this->get_runtime_group_key( $group );
+
+            foreach ( array_keys( $this->cache ) as $cache_group ) {
+                if ( $cache_group === $runtime_group ) {
+                    unset( $this->cache[ $cache_group ] );
+                }
+            }
+
+            if ( ! $this->redis_available ) {
+                return true;
+            }
+
+            return $this->flush_index_key( $this->get_group_index_key( $group ) );
+        }
+
+        public function flush_runtime() {
+            $this->cache = array();
+
+            return true;
+        }
+
+        public function switch_to_blog( $blog_id ) {
+            $blog_id = (int) $blog_id;
+            if ( $blog_id < 1 ) {
+                $blog_id = 0;
+            }
+
+            $this->blog_scope = 'blog:' . $blog_id;
+
+            return true;
+        }
+
+        public function reset() {
+            return $this->flush_runtime();
+        }
+
+        public function add_global_groups( $groups ) {
+            foreach ( (array) $groups as $group ) {
+                $group = $this->normalize_group( $group );
+                if ( '' !== $group ) {
+                    $this->global_groups[ $group ] = true;
+                }
+            }
+        }
+
+        public function add_non_persistent_groups( $groups ) {
+            foreach ( (array) $groups as $group ) {
+                $group = $this->normalize_group( $group );
+                if ( '' !== $group ) {
+                    $this->non_persistent_groups[ $group ] = true;
+                }
+            }
+        }
+
+        public function stats() {
+            echo '<p>';
+            echo 'Cache Hits: ' . (int) $this->cache_hits . '<br>';
+            echo 'Cache Misses: ' . (int) $this->cache_misses . '<br>';
+            echo '</p>';
+        }
+
+        public function close() {
+            if ( ! $this->redis_available || ! $this->redis || ! method_exists( $this->redis, 'close' ) ) {
+                return true;
+            }
+
+            try {
+                $this->redis->close();
+            } catch ( Exception $e ) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private function remember_runtime_value( $group, $string_key, $value ) {
+            $runtime_key = $this->get_runtime_group_key( $group );
+
+            if ( ! isset( $this->cache[ $runtime_key ] ) ) {
+                $this->cache[ $runtime_key ] = array();
+            }
+
+            $this->cache[ $runtime_key ][ $string_key ] = array(
+                'value' => $value,
+                'found' => true,
+            );
+        }
+
+        private function forget_runtime_value( $group, $string_key ) {
+            $runtime_key = $this->get_runtime_group_key( $group );
+
+            if ( isset( $this->cache[ $runtime_key ][ $string_key ] ) ) {
+                unset( $this->cache[ $runtime_key ][ $string_key ] );
+            }
+        }
+
+        private function encode_payload( $data ) {
+            return serialize(
+                array(
+                    'value' => $data,
+                )
+            );
+        }
+
+        private function persist_payload( $redis_key, $group, $payload, $expire = 0 ) {
+            $result = false;
+
+            try {
+                if ( (int) $expire > 0 ) {
+                    $result = $this->redis->setex( $redis_key, max( 1, (int) $expire ), $payload );
+                } else {
+                    $result = $this->redis->set( $redis_key, $payload );
+                }
+
+                if ( $result ) {
+                    $this->register_persistent_key( $redis_key, $group );
+                }
+            } catch ( Exception $e ) {
+                $result = false;
+            }
+
+            return (bool) $result;
+        }
+
+        private function get_persistent_ttl( $redis_key ) {
+            if ( ! $this->redis_available ) {
+                return 0;
+            }
+
+            try {
+                $ttl = (int) $this->redis->ttl( $redis_key );
+
+                if ( $ttl > 0 ) {
+                    return $ttl;
+                }
+            } catch ( Exception $e ) {
+                return 0;
+            }
+
+            return 0;
+        }
+
+        private function connect() {
+            if ( ! class_exists( 'Redis' ) ) {
+                return false;
+            }
+
+            try {
+                $redis    = new Redis();
+                $host     = isset( $this->config['host'] ) ? (string) $this->config['host'] : '127.0.0.1';
+                $username = isset( $this->config['username'] ) ? trim( (string) $this->config['username'] ) : '';
+                $port     = isset( $this->config['port'] ) ? (int) $this->config['port'] : 6379;
+                $ok       = false;
+
+                if ( 0 === strpos( $host, '/' ) ) {
+                    $ok = @ $redis->connect( $host );
+                } else {
+                    $ok = @ $redis->connect( $host, $port, 1.5 );
+                }
+
+                if ( ! $ok ) {
+                    return false;
+                }
+
+                if ( defined( 'Redis::OPT_SCAN' ) && defined( 'Redis::SCAN_RETRY' ) && method_exists( $redis, 'setOption' ) ) {
+                    @ $redis->setOption( Redis::OPT_SCAN, Redis::SCAN_RETRY );
+                }
+
+                if ( '' !== $username ) {
+                    $auth_result = @ $redis->auth( array( $username, (string) $this->config['password'] ) );
+                } elseif ( ! empty( $this->config['password'] ) ) {
+                    $auth_result = @ $redis->auth( (string) $this->config['password'] );
+                } else {
+                    $auth_result = true;
+                }
+
+                if ( ! $auth_result ) {
+                    $redis->close();
+
+                    return false;
+                }
+
+                if ( ! empty( $this->config['database'] ) && ! @ $redis->select( (int) $this->config['database'] ) ) {
+                    $redis->close();
+
+                    return false;
+                }
+
+                $this->redis           = $redis;
+                $this->redis_available = true;
+
+                return true;
+            } catch ( Exception $e ) {
+                $this->redis           = null;
+                $this->redis_available = false;
+
+                return false;
+            }
+        }
+
+        private function build_key_prefix() {
+            if ( ! empty( $this->config['prefix'] ) ) {
+                return (string) $this->config['prefix'];
+            }
+
+            $db_name      = defined( 'DB_NAME' ) ? (string) DB_NAME : 'wpdb';
+            $table_prefix = isset( $GLOBALS['table_prefix'] ) ? (string) $GLOBALS['table_prefix'] : '';
+
+            return 'qsredis:' . md5( $db_name . '|' . $table_prefix ) . ':';
+        }
+
+        private function get_default_global_groups() {
+            return array(
+                'blog-details',
+                'blog-id-cache',
+                'blog-lookup',
+                'blog_meta',
+                'global-posts',
+                'networks',
+                'network-queries',
+                'rss',
+                'site-details',
+                'site-options',
+                'site-queries',
+                'site-transient',
+                'sites',
+                'user-queries',
+                'user_meta',
+                'useremail',
+                'userlogins',
+                'users',
+                'usermeta',
+            );
+        }
+
+        private function get_current_blog_scope() {
+            if ( function_exists( 'is_multisite' ) && is_multisite() && function_exists( 'get_current_blog_id' ) ) {
+                return 'blog:' . (int) get_current_blog_id();
+            }
+
+            return 'blog:0';
+        }
+
+        private function normalize_group( $group ) {
+            $group = '' === (string) $group ? 'default' : (string) $group;
+
+            return preg_replace( '/[^A-Za-z0-9_.:-]/', '_', $group );
+        }
+
+        private function get_group_scope( $group ) {
+            if ( isset( $this->global_groups[ $group ] ) ) {
+                return 'global';
+            }
+
+            return $this->blog_scope;
+        }
+
+        private function get_runtime_group_key( $group ) {
+            return $this->get_group_scope( $group ) . ':' . $group;
+        }
+
+        private function build_data_key( $key, $group ) {
+            return $this->key_prefix . 'data:' . $this->get_group_scope( $group ) . ':' . $group . ':' . md5( (string) $key );
+        }
+
+        private function get_group_index_key( $group ) {
+            return $this->key_prefix . 'index:' . $this->get_group_scope( $group ) . ':' . $group;
+        }
+
+        private function register_persistent_key( $redis_key, $group ) {
+            if ( ! $this->redis_available ) {
+                return;
+            }
+
+            try {
+                $index_key = $this->get_group_index_key( $group );
+                $this->redis->sAdd( $index_key, $redis_key );
+                $this->redis->sAdd( $this->group_registry_key, $index_key );
+            } catch ( Exception $e ) {
+                // 容错处理，忽略单次失败
+            }
+        }
+
+        private function unregister_persistent_key( $redis_key, $group ) {
+            if ( ! $this->redis_available ) {
+                return;
+            }
+
+            try {
+                $index_key = $this->get_group_index_key( $group );
+                $this->redis->sRem( $index_key, $redis_key );
+                if ( (int) $this->redis->sCard( $index_key ) <= 0 ) {
+                    $this->redis->del( $index_key );
+                    $this->redis->sRem( $this->group_registry_key, $index_key );
+                }
+            } catch ( Exception $e ) {
+                // 容错处理，忽略单次失败
+            }
+        }
+
+        public function flush_by_prefix( $prefix ) {
+            if ( ! $this->redis_available || '' === (string) $prefix ) {
+                return false;
+            }
+
+            try {
+                $cursor = null;
+                $keys   = array();
+
+                do {
+                    $batch = $this->redis->scan( $cursor, $prefix . '*' );
+                    if ( false === $batch || empty( $batch ) ) {
+                        continue;
+                    }
+
+                    foreach ( (array) $batch as $key ) {
+                        $keys[] = $key;
+                        if ( count( $keys ) >= 500 ) {
+                            $this->delete_redis_keys( $keys );
+                            $keys = array();
+                        }
+                    }
+                } while ( 0 !== (int) $cursor );
+
+                if ( ! empty( $keys ) ) {
+                    $this->delete_redis_keys( $keys );
+                    $keys = array();
+                }
+
+                return true;
+            } catch ( Exception $e ) {
+                return false;
+            }
+        }
+
+        private function delete_redis_keys( array $keys ) {
+            if ( empty( $keys ) || ! $this->redis_available ) {
+                return;
+            }
+
+            try {
+                if ( method_exists( $this->redis, 'unlink' ) ) {
+                    call_user_func_array( array( $this->redis, 'unlink' ), $keys );
+                } else {
+                    call_user_func_array( array( $this->redis, 'del' ), $keys );
+                }
+            } catch ( Exception $e ) {
+                foreach ( $keys as $k ) {
+                    try {
+                        $this->redis->del( $k );
+                    } catch ( Exception $ignored ) {
+                    }
+                }
+            }
+        }
+
+        private function flush_index_key( $index_key ) {
+            if ( ! $this->redis_available ) {
+                return true;
+            }
+
+            try {
+                // 1. 优先使用 sPop 批量流式弹出消费，避免使用 sMembers 把庞大集合一次性拉入内存导致 OOM
+                $can_spop_batch = method_exists( $this->redis, 'sPop' );
+                while ( $can_spop_batch ) {
+                    $keys = false;
+                    try {
+                        $keys = $this->redis->sPop( $index_key, 500 );
+                    } catch ( Exception $e ) {
+                        $can_spop_batch = false;
+                        break;
+                    }
+
+                    if ( false === $keys || null === $keys || empty( $keys ) ) {
+                        break;
+                    }
+
+                    $batch = is_array( $keys ) ? $keys : array( $keys );
+                    if ( ! empty( $batch ) ) {
+                        $this->delete_redis_keys( $batch );
+                    }
+
+                    if ( count( $batch ) < 500 ) {
+                        break;
+                    }
+                }
+
+                // 2. 若 sPop 批量不支持，尝试使用 sScan 游标流式遍历删除
+                if ( ! $can_spop_batch && method_exists( $this->redis, 'sScan' ) ) {
+                    $cursor = null;
+                    do {
+                        $keys = $this->redis->sScan( $index_key, $cursor, null, 500 );
+                        if ( false === $keys ) {
+                            break;
+                        }
+                        if ( ! empty( $keys ) && is_array( $keys ) ) {
+                            $this->delete_redis_keys( (array) $keys );
+                        }
+                    } while ( 0 !== (int) $cursor );
+                }
+
+                // 3. 彻底删除索引键本身并从注册表中移除
+                $this->redis->del( $index_key );
+                $this->redis->sRem( $this->group_registry_key, $index_key );
+            } catch ( Exception $e ) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private function decode_payload( $payload ) {
+            if ( ! is_string( $payload ) || '' === $payload ) {
+                return false;
+            }
+
+            $decoded = @unserialize( $payload );
+
+            return $decoded;
+        }
+
+        private function is_non_persistent_group( $group ) {
+            return isset( $this->non_persistent_groups[ $group ] );
+        }
+    }
+}
+
+if ( ! function_exists( 'wp_cache_init' ) ) {
+    function wp_cache_init() {
+        global $wp_object_cache;
+        $wp_object_cache = new WP_Object_Cache();
+    }
+}
+
+if ( ! function_exists( 'wp_cache_add' ) ) {
+    function wp_cache_add( $key, $data, $group = '', $expire = 0 ) {
+        global $wp_object_cache;
+        return $wp_object_cache->add( $key, $data, $group, (int) $expire );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_add_multiple' ) ) {
+    function wp_cache_add_multiple( $data, $group = '', $expire = 0 ) {
+        global $wp_object_cache;
+        return $wp_object_cache->add_multiple( $data, $group, (int) $expire );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_set' ) ) {
+    function wp_cache_set( $key, $data, $group = '', $expire = 0 ) {
+        global $wp_object_cache;
+        return $wp_object_cache->set( $key, $data, $group, (int) $expire );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_set_multiple' ) ) {
+    function wp_cache_set_multiple( $data, $group = '', $expire = 0 ) {
+        global $wp_object_cache;
+        return $wp_object_cache->set_multiple( $data, $group, (int) $expire );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_get' ) ) {
+    function wp_cache_get( $key, $group = '', $force = false, &$found = null ) {
+        global $wp_object_cache;
+        return $wp_object_cache->get( $key, $group, (bool) $force, $found );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_get_multiple' ) ) {
+    function wp_cache_get_multiple( $keys, $group = '', $force = false ) {
+        global $wp_object_cache;
+        return $wp_object_cache->get_multiple( $keys, $group, (bool) $force );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_delete' ) ) {
+    function wp_cache_delete( $key, $group = '' ) {
+        global $wp_object_cache;
+        return $wp_object_cache->delete( $key, $group );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_delete_multiple' ) ) {
+    function wp_cache_delete_multiple( $keys, $group = '' ) {
+        global $wp_object_cache;
+        return $wp_object_cache->delete_multiple( $keys, $group );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_replace' ) ) {
+    function wp_cache_replace( $key, $data, $group = '', $expire = 0 ) {
+        global $wp_object_cache;
+        return $wp_object_cache->replace( $key, $data, $group, (int) $expire );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_incr' ) ) {
+    function wp_cache_incr( $key, $offset = 1, $group = '' ) {
+        global $wp_object_cache;
+        return $wp_object_cache->incr( $key, (int) $offset, $group );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_decr' ) ) {
+    function wp_cache_decr( $key, $offset = 1, $group = '' ) {
+        global $wp_object_cache;
+        return $wp_object_cache->decr( $key, (int) $offset, $group );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_flush' ) ) {
+    function wp_cache_flush() {
+        global $wp_object_cache;
+        return $wp_object_cache->flush();
+    }
+}
+
+if ( ! function_exists( 'wp_cache_flush_group' ) ) {
+    function wp_cache_flush_group( $group ) {
+        global $wp_object_cache;
+        return $wp_object_cache->flush_group( $group );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_flush_runtime' ) ) {
+    function wp_cache_flush_runtime() {
+        global $wp_object_cache;
+        return $wp_object_cache->flush_runtime();
+    }
+}
+
+if ( ! function_exists( 'wp_cache_switch_to_blog' ) ) {
+    function wp_cache_switch_to_blog( $blog_id ) {
+        global $wp_object_cache;
+        return $wp_object_cache->switch_to_blog( $blog_id );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_reset' ) ) {
+    function wp_cache_reset() {
+        global $wp_object_cache;
+        return $wp_object_cache->reset();
+    }
+}
+
+if ( ! function_exists( 'wp_cache_add_global_groups' ) ) {
+    function wp_cache_add_global_groups( $groups ) {
+        global $wp_object_cache;
+        $wp_object_cache->add_global_groups( $groups );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_add_non_persistent_groups' ) ) {
+    function wp_cache_add_non_persistent_groups( $groups ) {
+        global $wp_object_cache;
+        $wp_object_cache->add_non_persistent_groups( $groups );
+    }
+}
+
+if ( ! function_exists( 'wp_cache_close' ) ) {
+    function wp_cache_close() {
+        global $wp_object_cache;
+        return $wp_object_cache->close();
+    }
+}
+
+if ( ! function_exists( 'wp_cache_supports' ) ) {
+    function wp_cache_supports( $feature ) {
+        return in_array(
+            (string) $feature,
+            array(
+                'add_multiple',
+                'delete_multiple',
+                'flush_group',
+                'flush_runtime',
+                'get_multiple',
+                'set_multiple',
+            ),
+            true
+        );
+    }
+}
+
+if ( ! isset( $GLOBALS['wp_object_cache'] ) || ! is_object( $GLOBALS['wp_object_cache'] ) ) {
+    $GLOBALS['wp_object_cache'] = new WP_Object_Cache();
+}
