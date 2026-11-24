@@ -1739,31 +1739,39 @@ class QS_DB_Toolkit {
                 <div style="background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:20px; max-width:850px;">
                     <table class="form-table" role="presentation">
                         <tr>
-                            <th scope="row"><label for="qs-rep-search">搜索目标字符串 / 原域名</label></th>
+                            <th scope="row" style="vertical-align:top; padding-top:16px;">
+                                <label for="qs-rep-search" style="font-weight:600; color:#1e293b;">搜索目标字符串 / 原域名</label>
+                            </th>
                             <td>
-                                <input type="text" id="qs-rep-search" class="regular-text" style="width:100%;" placeholder="例如：http://old-domain.com 或 旧关键词">
-                                <div style="margin-top:6px;">
-                                    <button type="button" class="button button-small" id="qs-btn-fill-home-url">
-                                        自动填入当前站点地址 (<code><?php echo esc_html( home_url() ); ?></code>)
+                                <input type="text" id="qs-rep-search" class="regular-text" style="width:100%; max-width:640px; height:34px; line-height:32px;" placeholder="例如：http://old-domain.com 或 旧关键词">
+                                <div style="margin-top:8px; margin-bottom:6px; display:flex; align-items:center;">
+                                    <button type="button" class="button button-small" id="qs-btn-fill-home-url" style="display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:28px; height:28px; line-height:1; padding:0 10px;">
+                                        <span style="display:inline-flex; align-items:center; line-height:1;">自动填入当前站点地址 (</span>
+                                        <code style="display:inline-flex; align-items:center; line-height:1; padding:2px 6px; margin:0; font-size:11px; background:#e2e8f0; color:#1e293b; border-radius:4px; font-family:Consolas, Monaco, monospace;"><?php echo esc_html( home_url() ); ?></code>
+                                        <span style="display:inline-flex; align-items:center; line-height:1;">)</span>
                                     </button>
                                 </div>
-                                <p class="description">区分大小写。将精确匹配并替换该字符串或域名。</p>
+                                <p class="description" style="margin-top:4px; margin-bottom:0; color:#64748b;">区分大小写。将精确匹配并替换该字符串或域名。</p>
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row"><label for="qs-rep-replace">替换为新字符串 / 新域名</label></th>
+                            <th scope="row" style="vertical-align:top; padding-top:16px;">
+                                <label for="qs-rep-replace" style="font-weight:600; color:#1e293b;">替换为新字符串 / 新域名</label>
+                            </th>
                             <td>
-                                <input type="text" id="qs-rep-replace" class="regular-text" style="width:100%;" placeholder="例如：https://new-domain.com 或 新关键词">
-                                <p class="description">支持替换为新域名或新文本，留空表示将其剔除/清空。</p>
+                                <input type="text" id="qs-rep-replace" class="regular-text" style="width:100%; max-width:640px; height:34px; line-height:32px;" placeholder="例如：https://new-domain.com 或 新关键词">
+                                <p class="description" style="margin-top:6px; margin-bottom:0; color:#64748b;">支持替换为新域名或新文本，留空表示将其剔除/清空。</p>
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">目标数据表范围 (WordPress 核心)</th>
+                            <th scope="row" style="vertical-align:top; padding-top:16px;">
+                                <span style="font-weight:600; color:#1e293b;">目标数据表范围 (WordPress 核心)</span>
+                            </th>
                             <td>
-                                <div style="margin-bottom:10px;">
-                                    <button type="button" class="button button-small" id="qs-btn-select-all-tables">全选核心表</button>
-                                    <button type="button" class="button button-small" id="qs-btn-select-default-tables">恢复推荐默认</button>
-                                    <button type="button" class="button button-small" id="qs-btn-unselect-tables">全部取消</button>
+                                <div style="margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+                                    <button type="button" class="button button-small qs-subtab-inline-btn" id="qs-btn-select-all-tables">全选核心表</button>
+                                    <button type="button" class="button button-small qs-subtab-inline-btn" id="qs-btn-select-default-tables">恢复推荐默认</button>
+                                    <button type="button" class="button button-small qs-subtab-inline-btn" id="qs-btn-unselect-tables">全部取消</button>
                                 </div>
                                 <div style="max-height:240px; overflow-y:auto; border:1px solid #cbd5e1; border-radius:4px; padding:10px 14px; background:#f8fafc;">
                                     <?php foreach ( $replaceable_tables as $tb ) : ?>
@@ -1779,19 +1787,21 @@ class QS_DB_Toolkit {
                             </td>
                         </tr>
                         <tr>
-                            <th scope="row">运行模式</th>
+                            <th scope="row" style="vertical-align:top; padding-top:16px;">
+                                <span style="font-weight:600; color:#1e293b;">运行模式</span>
+                            </th>
                             <td>
                                 <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                                     <input type="checkbox" id="qs-rep-dryrun" checked>
                                     <strong style="color:#2563eb;">预演测试模式 (Dry-Run，仅统计命中数，不写入数据库)</strong>
                                 </label>
-                                <p class="description">强烈建议先勾选预演测试，确认命中条数无误后，再取消勾选执行正式替换。</p>
+                                <p class="description" style="margin-top:6px; margin-bottom:0; color:#64748b;">强烈建议先勾选预演测试，确认命中条数无误后，再取消勾选执行正式替换。</p>
                             </td>
                         </tr>
                     </table>
 
-                    <div style="margin-top:20px; padding-top:15px; border-top:1px solid #f1f5f9;">
-                        <button type="button" class="button button-primary" id="qs-btn-start-replace" style="padding:4px 20px; height:34px;">
+                    <div style="margin-top:20px; padding-top:16px; border-top:1px solid #f1f5f9; display:flex; align-items:center;">
+                        <button type="button" class="button button-primary" id="qs-btn-start-replace" style="display:inline-flex; align-items:center; justify-content:center; text-align:center; min-height:36px; height:36px; line-height:1; padding:0 24px; font-size:14px; font-weight:600;">
                             开始执行替换
                         </button>
                     </div>
@@ -1843,8 +1853,11 @@ class QS_DB_Toolkit {
 
         <script>
         jQuery(function($) {
-            var ajaxurl = qsData.ajaxurl;
-            var nonce   = qsData.nonce;
+            var ajaxurl   = (typeof qsData !== 'undefined' && qsData.ajaxurl) ? qsData.ajaxurl : (ajaxurl || '');
+            var nonce     = (typeof qsData !== 'undefined' && qsData.nonce) ? qsData.nonce : '';
+            var qsConfirm = window.qsConfirm || function(opts) { return Promise.resolve(confirm(typeof opts === 'string' ? opts : (opts.message || ''))); };
+            var qsAlert   = window.qsAlert   || function(opts) { alert(typeof opts === 'string' ? opts : (opts.message || '')); return Promise.resolve(); };
+            var qsToast   = window.qsToast   || function(msg) { alert(msg); };
 
             // 1. 子选项卡切换
             $('.qs-subtab-btn').on('click', function() {
@@ -1876,7 +1889,7 @@ class QS_DB_Toolkit {
                     $('#qs-analytics-loading').hide();
 
                     if (!res.success) {
-                        alert(res.data && res.data.message ? res.data.message : '分析失败');
+                        qsToast(res.data && res.data.message ? res.data.message : '分析失败', 'error');
                         return;
                     }
 
@@ -1980,10 +1993,16 @@ class QS_DB_Toolkit {
             });
 
             // 禁用单个 Autoload
-            $(document).on('click', '.qs-btn-disable-autoload', function() {
+            $(document).on('click', '.qs-btn-disable-autoload', async function() {
                 var $btn = $(this);
                 var optName = $btn.data('option');
-                if (!confirm('确定要将选项 [' + optName + '] 设为不自动加载吗？\n这将释放前台常驻内存，但在极少数插件中若强依赖该选项可能需要其自行按需读取。')) {
+                var confirmed = await qsConfirm({
+                    title: '调整自动加载配置',
+                    message: '确定要将选项 [' + optName + '] 设为不自动加载吗？\n这将释放前台常驻内存，但在极少数插件中若强依赖该选项可能需要其自行按需读取。',
+                    confirmLabel: '确认修改为 no',
+                    tone: 'primary'
+                });
+                if (!confirmed) {
                     return;
                 }
                 $btn.prop('disabled', true).text('修改中...');
@@ -1995,27 +2014,43 @@ class QS_DB_Toolkit {
                 }, function(res) {
                     if (res.success) {
                         $btn.replaceWith('<span style="color:#16a34a; font-size:12px;">已转为 no</span>');
+                        qsToast('选项已设为不自动加载', 'success');
                     } else {
-                        alert(res.data && res.data.message ? res.data.message : '修改失败');
+                        qsToast(res.data && res.data.message ? res.data.message : '修改失败', 'error');
                         $btn.prop('disabled', false).text('转为不自动加载 (no)');
                     }
                 });
             });
 
             // 3. 垃圾数据清理 (Dry-run / Real)
-            function runCleanup(isDryRun) {
+            async function runCleanup(isDryRun) {
                 var targets = [];
                 $('.qs-cleanup-cb:checked').each(function() {
                     targets.push($(this).val());
                 });
 
                 if (targets.length === 0) {
-                    alert('请至少勾选一个清理项！');
+                    qsAlert({
+                        title: '参数提示',
+                        message: '请至少勾选一个清理项！',
+                        tone: 'warning'
+                    });
                     return;
                 }
 
-                if (!isDryRun && !confirm('警告：您当前选择的是【正式清理】模式，匹配的垃圾数据将被永久物理删除且无法撤销！\n请确认您已完成数据库备份。确定继续吗？')) {
-                    return;
+                if (!isDryRun) {
+                    var confirmed = await qsConfirm({
+                        title: '正式物理清理确认',
+                        eyebrow: '数据库清理高危操作',
+                        message: '警告：您当前选择的是【正式清理】模式，匹配的垃圾数据将被永久物理删除且无法撤销！\n请确认您已完成数据库备份。确定继续吗？',
+                        confirmLabel: '确认物理删除',
+                        cancelLabel: '取消操作',
+                        tone: 'danger',
+                        icon: 'warning'
+                    });
+                    if (!confirmed) {
+                        return;
+                    }
                 }
 
                 var keepRevisions = $('#qs-cleanup-keep-revisions').val();
@@ -2051,8 +2086,14 @@ class QS_DB_Toolkit {
             $('#qs-btn-cleanup-run').on('click', function() { runCleanup(false); });
 
             // 4. 数据表优化 (OPTIMIZE TABLE)
-            $('#qs-btn-run-table-optimize').on('click', function() {
-                if (!confirm('确定要对全库产生碎片的数据表执行 OPTIMIZE TABLE 整理吗？')) {
+            $('#qs-btn-run-table-optimize').on('click', async function() {
+                var confirmed = await qsConfirm({
+                    title: '数据表碎片整理',
+                    message: '确定要对全库产生碎片的数据表执行 OPTIMIZE TABLE 整理吗？整理期间可能会短暂锁表。',
+                    confirmLabel: '立即开始整理',
+                    tone: 'primary'
+                });
+                if (!confirmed) {
                     return;
                 }
                 var $btn = $(this);
@@ -2099,13 +2140,17 @@ class QS_DB_Toolkit {
             $('#qs-btn-unselect-tables').on('click', function() { $('.qs-rep-table-cb').prop('checked', false); });
 
             // 6. 执行全量批量替换
-            $('#qs-btn-start-replace').on('click', function() {
+            $('#qs-btn-start-replace').on('click', async function() {
                 var searchStr  = $('#qs-rep-search').val();
                 var replaceStr = $('#qs-rep-replace').val();
                 var isDryRun   = $('#qs-rep-dryrun').is(':checked');
 
                 if (!searchStr) {
-                    alert('请输入要搜索的源字符串！');
+                    qsAlert({
+                        title: '参数提示',
+                        message: '请输入要搜索的源字符串或域名！',
+                        tone: 'warning'
+                    });
                     return;
                 }
 
@@ -2115,12 +2160,28 @@ class QS_DB_Toolkit {
                 });
 
                 if (tables.length === 0) {
-                    alert('请至少勾选一个目标数据表！');
+                    qsAlert({
+                        title: '参数提示',
+                        message: '请至少勾选一个目标数据表！',
+                        tone: 'warning'
+                    });
                     return;
                 }
 
-                if (!isDryRun && !confirm('【极度严重警告】\n您当前取消了预演测试，即将进行【真实全库替换】！\n替换将永久改写数据库中的所有匹配记录且无法撤销！\n请再次确认您已完成数据库备份。\n\n确定要立即开始写入替换吗？')) {
-                    return;
+                if (!isDryRun) {
+                    var confirmed = await qsConfirm({
+                        title: '【极度严重警告】',
+                        eyebrow: '全库数据真实写入',
+                        lead: '您当前取消了预演测试，即将进行【真实全库替换】！',
+                        message: '替换将永久改写数据库中的所有匹配记录且无法撤销！\n请再次确认您已完成数据库完整备份。\n\n确定要立即开始写入替换吗？',
+                        confirmLabel: '立即开始写入替换',
+                        cancelLabel: '取消操作',
+                        tone: 'danger',
+                        icon: 'warning'
+                    });
+                    if (!confirmed) {
+                        return;
+                    }
                 }
 
                 var $btn = $(this);
@@ -2232,8 +2293,14 @@ class QS_DB_Toolkit {
             }
 
             $('#qs-btn-refresh-logs').on('click', loadLogs);
-            $('#qs-btn-clear-logs').on('click', function() {
-                if (!confirm('确定要清空全部数据库工具箱日志吗？')) {
+            $('#qs-btn-clear-logs').on('click', async function() {
+                var confirmed = await qsConfirm({
+                    title: '清空运维日志',
+                    message: '确定要清空全部数据库工具箱日志吗？此操作不可撤销。',
+                    confirmLabel: '确认清空',
+                    tone: 'danger'
+                });
+                if (!confirmed) {
                     return;
                 }
                 $.post(ajaxurl, {
@@ -2242,6 +2309,7 @@ class QS_DB_Toolkit {
                 }, function(res) {
                     if (res.success) {
                         loadLogs();
+                        qsToast('已清空运维日志', 'success');
                     }
                 });
             });
@@ -2287,13 +2355,21 @@ class QS_DB_Toolkit {
                 $('#qs-indexes-table-body').html(html);
             }
 
-            $(document).on('click', '.qs-btn-toggle-idx', function() {
+            $(document).on('click', '.qs-btn-toggle-idx', async function() {
                 var $btn = $(this);
                 var key = $btn.data('key');
                 var act = $btn.data('action');
 
-                if (act === 'drop' && !confirm('确定要移除该优化索引并恢复默认结构吗？\n移除后多条件查询速度可能会下降。')) {
-                    return;
+                if (act === 'drop') {
+                    var confirmed = await qsConfirm({
+                        title: '移除优化索引',
+                        message: '确定要移除该优化索引并恢复默认结构吗？\n移除后多条件查询速度可能会下降。',
+                        confirmLabel: '确认移除',
+                        tone: 'warning'
+                    });
+                    if (!confirmed) {
+                        return;
+                    }
                 }
 
                 $btn.prop('disabled', true).text(act === 'add' ? '创建中...' : '移除中...');
@@ -2308,18 +2384,25 @@ class QS_DB_Toolkit {
                     if (res.success) {
                         $('#qs-index-action-feedback').css('color', '#16a34a').text(res.data.message).show();
                         renderIndexList(res.data.indexes);
+                        qsToast(res.data.message, 'success');
                     } else {
                         $('#qs-index-action-feedback').css('color', '#dc2626').text('操作失败: ' + (res.data && res.data.message ? res.data.message : '未知错误')).show();
                         loadIndexes();
                     }
                 }).fail(function() {
-                    alert('网络超时或数据库异常，请检查权限。');
+                    qsToast('网络超时或数据库异常，请检查权限。', 'error');
                     loadIndexes();
                 });
             });
 
-            $('#qs-btn-apply-all-indexes').on('click', function() {
-                if (!confirm('确定要一键启用全部 3 项核心复合索引吗？\n系统将自动在线安全构建索引，加速自定义字段、配置和列表查询。')) {
+            $('#qs-btn-apply-all-indexes').on('click', async function() {
+                var confirmed = await qsConfirm({
+                    title: '一键启用复合索引',
+                    message: '确定要一键启用全部 3 项核心复合索引吗？\n系统将自动在线安全构建索引，加速自定义字段、配置和列表查询。',
+                    confirmLabel: '立即批量构建',
+                    tone: 'primary'
+                });
+                if (!confirmed) {
                     return;
                 }
                 var $btn = $(this);
@@ -2336,6 +2419,7 @@ class QS_DB_Toolkit {
                     if (res.success) {
                         $('#qs-index-action-feedback').css('color', '#16a34a').text(res.data.message).show();
                         renderIndexList(res.data.indexes);
+                        qsToast(res.data.message, 'success');
                     } else {
                         $('#qs-index-action-feedback').css('color', '#dc2626').text('部分或全部失败: ' + (res.data && res.data.message ? res.data.message : '未知错误')).show();
                         loadIndexes();
@@ -2343,8 +2427,14 @@ class QS_DB_Toolkit {
                 });
             });
 
-            $('#qs-btn-drop-all-indexes').on('click', function() {
-                if (!confirm('确定要一键移除所有优化索引并恢复出厂默认吗？')) {
+            $('#qs-btn-drop-all-indexes').on('click', async function() {
+                var confirmed = await qsConfirm({
+                    title: '恢复出厂默认索引',
+                    message: '确定要一键移除所有优化索引并恢复出厂默认吗？',
+                    confirmLabel: '确认移除恢复',
+                    tone: 'danger'
+                });
+                if (!confirmed) {
                     return;
                 }
                 var $btn = $(this);
@@ -2361,6 +2451,7 @@ class QS_DB_Toolkit {
                     if (res.success) {
                         $('#qs-index-action-feedback').css('color', '#16a34a').text(res.data.message).show();
                         renderIndexList(res.data.indexes);
+                        qsToast(res.data.message, 'success');
                     } else {
                         $('#qs-index-action-feedback').css('color', '#dc2626').text('部分或全部失败: ' + (res.data && res.data.message ? res.data.message : '未知错误')).show();
                         loadIndexes();

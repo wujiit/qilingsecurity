@@ -1,3 +1,261 @@
+/**
+ * 启灵安全中心 - 全局现代 UI 弹窗与通知体系
+ */
+(function(window, document) {
+    let modalElement = null;
+    let toastContainer = null;
+    let activeModalState = null;
+
+    function safeAppend(child) {
+        if (!child || !(child instanceof Node)) return;
+        if (document.body) {
+            if (!document.body.contains(child)) {
+                document.body.appendChild(child);
+            }
+        } else {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (document.body && !document.body.contains(child)) {
+                    document.body.appendChild(child);
+                }
+            });
+        }
+    }
+
+    function ensureModal() {
+        if (modalElement && document.body && document.body.contains(modalElement)) {
+            return modalElement;
+        }
+
+        if (!modalElement) {
+            modalElement = document.createElement('div');
+            modalElement.className = 'qs-global-modal';
+            modalElement.id = 'qs-global-modal';
+            modalElement.hidden = true;
+            modalElement.innerHTML = [
+                '<div class="qs-global-modal__backdrop" data-qs-modal-close="cancel"></div>',
+                '<div class="qs-global-modal__dialog" role="dialog" aria-modal="true">',
+                '  <div class="qs-global-modal__header">',
+                '    <div class="qs-global-modal__badge" id="qs-global-modal-badge">',
+                '      <span class="dashicons dashicons-shield"></span>',
+                '    </div>',
+                '    <div class="qs-global-modal__heading">',
+                '      <span class="qs-global-modal__eyebrow" id="qs-global-modal-eyebrow">启灵安全中心</span>',
+                '      <h3 class="qs-global-modal__title" id="qs-global-modal-title">操作提示</h3>',
+                '    </div>',
+                '    <button type="button" class="qs-global-modal__close" data-qs-modal-close="cancel" aria-label="关闭">×</button>',
+                '  </div>',
+                '  <div class="qs-global-modal__body" id="qs-global-modal-body"></div>',
+                '  <div class="qs-global-modal__footer">',
+                '    <button type="button" class="button qs-global-modal__cancel" data-qs-modal-close="cancel" id="qs-global-modal-cancel">取消</button>',
+                '    <button type="button" class="button button-primary qs-global-modal__confirm" id="qs-global-modal-confirm">确定</button>',
+                '  </div>',
+                '</div>'
+            ].join('');
+
+            modalElement.addEventListener('click', function(e) {
+                const closeBtn = e.target.closest('[data-qs-modal-close]');
+                if (closeBtn) {
+                    e.preventDefault();
+                    closeModal(false);
+                    return;
+                }
+                const confirmBtn = e.target.closest('.qs-global-modal__confirm');
+                if (confirmBtn) {
+                    e.preventDefault();
+                    closeModal(true);
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (!activeModalState || !modalElement || modalElement.hidden) return;
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeModal(false);
+                } else if (e.key === 'Enter') {
+                    if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
+                    const confirmBtn = modalElement.querySelector('.qs-global-modal__confirm');
+                    if (confirmBtn && !confirmBtn.disabled) {
+                        e.preventDefault();
+                        closeModal(true);
+                    }
+                }
+            });
+        }
+
+        safeAppend(modalElement);
+        return modalElement;
+    }
+
+    function closeModal(result) {
+        if (!activeModalState) return;
+        const state = activeModalState;
+        activeModalState = null;
+
+        const modal = ensureModal();
+        modal.classList.remove('is-open');
+        if (document.body) {
+            document.body.classList.remove('qs-modal-lock');
+        }
+        
+        setTimeout(function() {
+            modal.hidden = true;
+            if (state.previousFocus && typeof state.previousFocus.focus === 'function') {
+                try { state.previousFocus.focus(); } catch (_) {}
+            }
+            if (typeof state.resolve === 'function') {
+                state.resolve(Boolean(result));
+            }
+        }, 180);
+    }
+
+    function escapeHtml(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function qsConfirm(options) {
+        return new Promise(function(resolve) {
+            const opts = typeof options === 'string' ? { message: options } : (options || {});
+            const modal = ensureModal();
+            const tone = ['danger', 'warning', 'success', 'primary'].includes(opts.tone) ? opts.tone : 'primary';
+
+            const badge = modal.querySelector('#qs-global-modal-badge');
+            const eyebrow = modal.querySelector('#qs-global-modal-eyebrow');
+            const title = modal.querySelector('#qs-global-modal-title');
+            const body = modal.querySelector('#qs-global-modal-body');
+            const cancelBtn = modal.querySelector('#qs-global-modal-cancel');
+            const confirmBtn = modal.querySelector('#qs-global-modal-confirm');
+
+            badge.className = 'qs-global-modal__badge is-' + tone;
+            const iconMap = {
+                danger: 'dashicons-warning',
+                warning: 'dashicons-warning',
+                success: 'dashicons-yes-alt',
+                primary: 'dashicons-shield'
+            };
+            const dashiconClass = opts.icon ? ('dashicons-' + String(opts.icon).replace(/^dashicons-/, '')) : (iconMap[tone] || 'dashicons-shield');
+            badge.innerHTML = '<span class="dashicons ' + dashiconClass + '"></span>';
+
+            eyebrow.textContent = opts.eyebrow || '启灵安全中心提示';
+            title.textContent = opts.title || (tone === 'danger' ? '高风险操作确认' : (tone === 'warning' ? '重要操作确认' : '操作确认'));
+
+            const rawMsg = opts.message || opts.text || '';
+            let bodyHtml = '';
+            if (opts.lead) {
+                bodyHtml += '<div class="qs-global-modal__lead">' + escapeHtml(opts.lead) + '</div>';
+            }
+            if (rawMsg) {
+                const isHeavy = tone === 'danger' || tone === 'warning';
+                bodyHtml += '<div class="qs-global-modal__box' + (isHeavy ? ' is-' + tone : '') + '">' + escapeHtml(rawMsg) + '</div>';
+            }
+            if (opts.extraHtml) {
+                bodyHtml += opts.extraHtml;
+            }
+            body.innerHTML = bodyHtml;
+
+            cancelBtn.style.display = opts.hideCancel ? 'none' : 'inline-flex';
+            cancelBtn.textContent = opts.cancelLabel || '取消';
+            confirmBtn.className = 'button button-primary qs-global-modal__confirm' + (tone !== 'primary' ? ' is-' + tone : '');
+            confirmBtn.textContent = opts.confirmLabel || (tone === 'danger' ? '确认执行' : '确定');
+
+            activeModalState = {
+                resolve: resolve,
+                previousFocus: document.activeElement instanceof HTMLElement ? document.activeElement : null
+            };
+
+            modal.hidden = false;
+            if (document.body) {
+                document.body.classList.add('qs-modal-lock');
+            }
+            setTimeout(function() {
+                modal.classList.add('is-open');
+                confirmBtn.focus();
+            }, 16);
+        });
+    }
+
+    function qsAlert(options) {
+        const opts = typeof options === 'string' ? { message: options } : (options || {});
+        return qsConfirm(Object.assign({}, opts, {
+            hideCancel: true,
+            confirmLabel: opts.confirmLabel || '我知道了',
+            tone: opts.tone || 'primary'
+        })).then(function() {});
+    }
+
+    function ensureToastContainer() {
+        if (toastContainer && document.body && document.body.contains(toastContainer)) {
+            return toastContainer;
+        }
+        if (!toastContainer) {
+            toastContainer = document.createElement('div');
+            toastContainer.className = 'qs-toast-container';
+            toastContainer.id = 'qs-toast-container';
+        }
+        safeAppend(toastContainer);
+        return toastContainer;
+    }
+
+    function qsToast(message, tone, duration) {
+        if (!message) return;
+        const container = ensureToastContainer();
+        const safeTone = ['success', 'error', 'warning', 'info'].includes(tone) ? tone : 'info';
+        const toast = document.createElement('div');
+        toast.className = 'qs-toast qs-toast--' + safeTone;
+
+        const iconMap = {
+            success: 'dashicons-yes-alt',
+            error: 'dashicons-dismiss',
+            warning: 'dashicons-warning',
+            info: 'dashicons-info'
+        };
+
+        toast.innerHTML = [
+            '<span class="dashicons ' + (iconMap[safeTone] || 'dashicons-info') + ' qs-toast__icon"></span>',
+            '<div class="qs-toast__content">' + escapeHtml(message) + '</div>',
+            '<button type="button" class="qs-toast__close" aria-label="关闭">×</button>'
+        ].join('');
+
+        toast.querySelector('.qs-toast__close').addEventListener('click', function() {
+            dismissToast(toast);
+        });
+
+        if (container && (toast instanceof Node)) {
+            container.appendChild(toast);
+        }
+        setTimeout(function() {
+            toast.classList.add('is-visible');
+        }, 16);
+
+        const timeout = Math.max(2000, Number(duration) || 3500);
+        const timer = setTimeout(function() {
+            dismissToast(toast);
+        }, timeout);
+
+        function dismissToast(el) {
+            clearTimeout(timer);
+            el.classList.remove('is-visible');
+            el.classList.add('is-leaving');
+            setTimeout(function() {
+                if (el.parentNode) el.parentNode.removeChild(el);
+            }, 240);
+        }
+    }
+
+    window.qsConfirm = qsConfirm;
+    window.qsAlert = qsAlert;
+    window.qsToast = qsToast;
+    window.qsModal = {
+        confirm: qsConfirm,
+        alert: qsAlert,
+        toast: qsToast
+    };
+})(window, document);
+
 jQuery(document).ready(function ($) {
     const payload = (typeof window !== 'undefined' && window.qsData && typeof window.qsData === 'object') ? window.qsData : {};
     const $startBtn = $('#qs-start-scan');
@@ -342,7 +600,7 @@ jQuery(document).ready(function ($) {
         loadIpRiskDetail(ipAddress, $btn);
     });
 
-    $(document).on('click', '#qs-iprisk-clear-profiles, #qs-iprisk-clear-events, #qs-iprisk-clear-all', function () {
+    $(document).on('click', '#qs-iprisk-clear-profiles, #qs-iprisk-clear-events, #qs-iprisk-clear-all', async function () {
         const $btn = $(this);
         const target = String($btn.attr('id') || '')
             .replace('qs-iprisk-clear-', '')
@@ -360,7 +618,13 @@ jQuery(document).ready(function ($) {
             all: '画像缓存 + 画像事件'
         };
         const label = labelMap[target] || target;
-        if (!confirm(`确定要清空 ${label} 吗？此操作不可恢复。`)) {
+        const confirmed = await qsConfirm({
+            title: '清空 IP 画像数据',
+            message: `确定要清空 ${label} 吗？此操作不可恢复。`,
+            confirmLabel: '确认清空',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -474,14 +738,20 @@ jQuery(document).ready(function ($) {
         });
     }
 
-    $(document).on('click', '#qs-iprisk-delete-current', function () {
+    $(document).on('click', '#qs-iprisk-delete-current', async function () {
         const $btn = $(this);
         const ipAddress = String($btn.data('ipAddress') || '').trim();
         if (!ipAddress) {
             return;
         }
 
-        if (!confirm(`确定删除 IP ${ipAddress} 的画像记录吗？`)) {
+        const confirmed = await qsConfirm({
+            title: '删除 IP 画像记录',
+            message: `确定删除 IP ${ipAddress} 的画像记录吗？此操作会同时删除该 IP 的关联事件。`,
+            confirmLabel: '确认删除',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -493,15 +763,15 @@ jQuery(document).ready(function ($) {
             delete_events: 1
         }, function (response) {
             if (!response || !response.success) {
-                alert('删除失败：' + ((response && response.data) ? response.data : '未知错误'));
+                qsToast('删除失败：' + ((response && response.data) ? response.data : '未知错误'), 'error');
                 $btn.prop('disabled', false);
                 return;
             }
 
-            alert(`已删除该 IP 记录：画像缓存 ${response.data.summary && response.data.summary.profiles ? response.data.summary.profiles : 0}，画像事件 ${response.data.summary && response.data.summary.events ? response.data.summary.events : 0}`);
+            qsToast(`已删除该 IP 记录：画像缓存 ${response.data.summary && response.data.summary.profiles ? response.data.summary.profiles : 0}，画像事件 ${response.data.summary && response.data.summary.events ? response.data.summary.events : 0}`, 'success');
             reloadCurrentTab(500);
         }).fail(function () {
-            alert('网络错误，请稍后再试');
+            qsToast('网络错误，请稍后再试', 'error');
             $btn.prop('disabled', false);
         });
     });
@@ -768,12 +1038,18 @@ jQuery(document).ready(function ($) {
         }
     }
 
-    $(document).on('click', '#qs-clear-route-isolation-logs', function () {
+    $(document).on('click', '#qs-clear-route-isolation-logs', async function () {
         const $btn = $(this);
         const $spinner = $('.qs-route-isolation-clear-spinner');
         const $msg = $('#qs-route-isolation-clear-message');
 
-        if (!confirm('确定清空路由隔离监控日志吗？此操作不可恢复。')) {
+        const confirmed = await qsConfirm({
+            title: '清空路由隔离日志',
+            message: '确定清空路由隔离监控日志吗？此操作不可恢复。',
+            confirmLabel: '确认清空',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -820,7 +1096,7 @@ jQuery(document).ready(function ($) {
             status: nextStatus
         }, function (response) {
             if (!response.success) {
-                alert('状态更新失败：' + (response.data || '未知错误'));
+                qsToast('状态更新失败：' + (response.data || '未知错误'), 'error');
                 $actionCell.find('button').prop('disabled', false);
                 return;
             }
@@ -832,18 +1108,24 @@ jQuery(document).ready(function ($) {
             $statusCell.html(buildResultStatusBadge(response.data.status));
             $actionCell.html(buildResultActionButtons(resultId, response.data.status, hasAdvice));
         }).fail(function () {
-            alert('网络错误，请稍后再试');
+            qsToast('网络错误，请稍后再试', 'error');
             $actionCell.find('button').prop('disabled', false);
         });
     });
 
-    $(document).on('click', '#qs-cleanup-data', function () {
+    $(document).on('click', '#qs-cleanup-data', async function () {
         const $btn = $(this);
         const $clearAllBtn = $('#qs-clear-all-history');
         const $spinner = $('.qs-cleanup-spinner');
         const $msg = $('#qs-cleanup-message');
 
-        if (!confirm('确定要按当前保留策略清理过期历史数据吗？此操作只会删除超过保留天数的旧扫描、旧审计以及已过期封禁记录，不会把当前数据全部清空。')) {
+        const confirmed = await qsConfirm({
+            title: '按策略清理过期数据',
+            message: '确定要按当前保留策略清理过期历史数据吗？此操作只会删除超过保留天数的旧扫描、旧审计以及已过期封禁记录，不会把当前数据全部清空。',
+            confirmLabel: '开始清理',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -877,13 +1159,19 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-clear-all-history', function () {
+    $(document).on('click', '#qs-clear-all-history', async function () {
         const $btn = $(this);
         const $cleanupBtn = $('#qs-cleanup-data');
         const $spinner = $('.qs-cleanup-spinner');
         const $msg = $('#qs-cleanup-message');
 
-        if (!confirm('确定要清空全部历史数据吗？这会删除扫描任务、扫描结果、审计日志、封禁记录、文件基线、手机号归属地缓存、IP地区缓存、地区限制日志、IP风险画像缓存和IP风险登录事件，但不会删除防护设置和官方规则包。此操作不可恢复。')) {
+        const confirmed = await qsConfirm({
+            title: '清空全部历史数据',
+            message: '确定要清空全部历史数据吗？这会删除扫描任务、扫描结果、审计日志、封禁记录、文件基线、手机号归属地缓存、IP地区缓存、地区限制日志、IP风险画像缓存和IP风险登录事件，但不会删除防护设置和官方规则包。此操作不可恢复。',
+            confirmLabel: '确认彻底清空',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -954,13 +1242,19 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-clear-ip-geo-cache', function () {
+    $(document).on('click', '#qs-clear-ip-geo-cache', async function () {
         const $clearBtn = $('#qs-clear-ip-geo-cache');
         const $cleanupBtn = $('#qs-cleanup-ip-geo-cache');
         const $spinner = $('.qs-ip-geo-cache-spinner');
         const $msg = $('#qs-ip-geo-cache-message');
 
-        if (!confirm('确定要清空全部 IP 地区缓存吗？清空后后续访问会重新请求所选 IP 查询来源。')) {
+        const confirmed = await qsConfirm({
+            title: '清空 IP 地区缓存',
+            message: '确定要清空全部 IP 地区缓存吗？清空后后续访问会重新请求所选 IP 查询来源。',
+            confirmLabel: '确认清空',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1031,13 +1325,19 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-clear-geo-block-logs', function () {
+    $(document).on('click', '#qs-clear-geo-block-logs', async function () {
         const $clearBtn = $('#qs-clear-geo-block-logs');
         const $cleanupBtn = $('#qs-cleanup-geo-block-logs');
         const $spinner = $('.qs-geo-block-logs-spinner');
         const $msg = $('#qs-geo-block-logs-message');
 
-        if (!confirm('确定要清空全部地区限制日志吗？此操作不可恢复。')) {
+        const confirmed = await qsConfirm({
+            title: '清空地区限制日志',
+            message: '确定要清空全部地区限制日志吗？此操作不可恢复。',
+            confirmLabel: '确认清空',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1071,12 +1371,18 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-clear-audit-logs', function () {
+    $(document).on('click', '#qs-clear-audit-logs', async function () {
         const $btn = $(this);
         const $spinner = $('.qs-clear-audit-spinner');
         const $msg = $('#qs-clear-audit-message');
 
-        if (!confirm('确定要单独清空审计日志吗？此操作只会删除操作审计表，不会影响扫描结果和封禁记录。')) {
+        const confirmed = await qsConfirm({
+            title: '单独清空审计日志',
+            message: '确定要单独清空审计日志吗？此操作只会删除操作审计表，不会影响扫描结果和封禁记录。',
+            confirmLabel: '确认清空',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1106,12 +1412,18 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-rebuild-file-baseline', function () {
+    $(document).on('click', '#qs-rebuild-file-baseline', async function () {
         const $btn = $(this);
         const $spinner = $('.qs-baseline-spinner');
         const $msg = $('#qs-baseline-message');
 
-        if (!confirm('确定要重建文件完整性基线吗？仅当当前站点文件状态已确认可信时执行。重建后，后续扫描会以当前文件状态作为新的对照标准。')) {
+        const confirmed = await qsConfirm({
+            title: '重建文件完整性基线',
+            message: '确定要重建文件完整性基线吗？仅当当前站点文件状态已确认可信时执行。重建后，后续扫描会以当前文件状态作为新的对照标准。',
+            confirmLabel: '确认重建基线',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1142,7 +1454,7 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-import-rules-package', function () {
+    $(document).on('click', '#qs-import-rules-package', async function () {
         const $btn = $(this);
         const $rollbackBtn = $('#qs-rollback-rules-package');
         const $spinner = $('.qs-rules-spinner');
@@ -1157,7 +1469,13 @@ jQuery(document).ready(function ($) {
             return;
         }
 
-        if (!confirm('确定要导入并启用该官方规则包吗？新规则会影响后续扫描判断，但不会自动修改网站文件和数据库。')) {
+        const confirmed = await qsConfirm({
+            title: '导入并启用规则包',
+            message: '确定要导入并启用该官方规则包吗？新规则会影响后续扫描判断，但不会自动修改网站文件和数据库。',
+            confirmLabel: '确认导入',
+            tone: 'primary'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1197,13 +1515,19 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-rollback-rules-package', function () {
+    $(document).on('click', '#qs-rollback-rules-package', async function () {
         const $btn = $(this);
         const $importBtn = $('#qs-import-rules-package');
         const $spinner = $('.qs-rules-spinner');
         const $msg = $('#qs-rules-message');
 
-        if (!confirm('确定要回滚到上一版官方规则吗？该操作只会影响后续扫描判定标准。')) {
+        const confirmed = await qsConfirm({
+            title: '回滚规则包',
+            message: '确定要回滚到上一版官方规则吗？该操作只会影响后续扫描判定标准。',
+            confirmLabel: '确认回滚',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1235,12 +1559,18 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '.qs-unban-btn', function () {
+    $(document).on('click', '.qs-unban-btn', async function () {
         const $btn = $(this);
         const ip = $btn.data('ip');
         const rowId = $btn.data('row');
 
-        if (!confirm(`确定要提前解封此恶意 IP: ${ip} 吗？`)) {
+        const confirmed = await qsConfirm({
+            title: '解封恶意 IP',
+            message: `确定要提前解封此恶意 IP: ${ip} 吗？解封后其将可以正常访问站点。`,
+            confirmLabel: '确认解封',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1255,24 +1585,31 @@ jQuery(document).ready(function ($) {
                 $(`#${rowId}`).fadeOut(300, function () {
                     $(this).remove();
                 });
+                qsToast(`已提前解封 IP ${ip}`, 'success');
             } else {
-                alert('解封失败：' + (response.data || '未知错误'));
+                qsToast('解封失败：' + (response.data || '未知错误'), 'error');
                 $btn.prop('disabled', false).text('立即解封');
             }
         }).fail(function () {
-            alert('网络错误，请稍后再试');
+            qsToast('网络错误，请稍后再试', 'error');
             $btn.prop('disabled', false).text('立即解封');
         });
     });
 
-    $(document).on('click', '.qs-destroy-session-btn', function () {
+    $(document).on('click', '.qs-destroy-session-btn', async function () {
         const $btn = $(this);
         const userId = $btn.data('userId');
         const verifier = $btn.data('verifier');
         const $spinner = $('.qs-sessions-spinner');
         const $msg = $('#qs-sessions-message');
 
-        if (!confirm('确定要强制下线该登录设备吗？下线后需要重新登录。')) {
+        const confirmed = await qsConfirm({
+            title: '强制下线设备',
+            message: '确定要强制下线该登录设备吗？下线后该设备需要重新登录。',
+            confirmLabel: '强制下线',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1302,7 +1639,7 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '.qs-destroy-user-sessions-btn', function () {
+    $(document).on('click', '.qs-destroy-user-sessions-btn', async function () {
         const $btn = $(this);
         const userId = $btn.data('userId');
         const preserveCurrent = $btn.data('preserveCurrent') ? '1' : '';
@@ -1312,7 +1649,13 @@ jQuery(document).ready(function ($) {
             ? '确定要强制下线该用户的其他活跃会话吗？当前后台会话会被保留。'
             : '确定要强制下线该用户的全部活跃会话吗？';
 
-        if (!confirm(confirmText)) {
+        const confirmed = await qsConfirm({
+            title: '清理用户活跃会话',
+            message: confirmText,
+            confirmLabel: '确认清理',
+            tone: 'warning'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1342,12 +1685,18 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on('click', '#qs-destroy-all-sessions', function () {
+    $(document).on('click', '#qs-destroy-all-sessions', async function () {
         const $btn = $(this);
         const $spinner = $('.qs-sessions-spinner');
         const $msg = $('#qs-sessions-message');
 
-        if (!confirm('确定要强制全部其他用户重新登录吗？系统会尽量保留当前管理员会话。')) {
+        const confirmed = await qsConfirm({
+            title: '强制下线全部其他用户',
+            message: '确定要强制全部其他用户重新登录吗？系统会尽量保留当前管理员会话。',
+            confirmLabel: '强制全部下线',
+            tone: 'danger'
+        });
+        if (!confirmed) {
             return;
         }
 
@@ -1709,8 +2058,14 @@ jQuery(document).ready(function ($) {
             runReplace(true);
         });
 
-        $executeBtn.off('click.qsDomainReplace').on('click.qsDomainReplace', function () {
-            if (!window.confirm('确定要执行替换吗？建议先备份数据库。')) {
+        $executeBtn.off('click.qsDomainReplace').on('click.qsDomainReplace', async function () {
+            const confirmed = await qsConfirm({
+                title: '执行全库域名替换',
+                message: '确定要执行全库域名替换吗？此操作将直接写入数据库，强烈建议您在执行前已完成数据库完整备份。',
+                confirmLabel: '立即执行替换',
+                tone: 'danger'
+            });
+            if (!confirmed) {
                 return;
             }
             runReplace(false);

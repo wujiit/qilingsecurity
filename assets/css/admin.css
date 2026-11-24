@@ -1266,12 +1266,470 @@
 }
 
 .qs-subtab-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     height: 32px !important;
-    line-height: 30px !important;
+    line-height: 1 !important;
     padding: 0 16px !important;
     font-size: 13px !important;
     font-weight: 500 !important;
-    border-radius: 4px !important;
+    border-radius: 6px !important;
     cursor: pointer;
     text-align: center;
+    vertical-align: middle;
+}
+
+/* ==========================================================================
+   数据库工具箱 - 通用安全替换样式与对齐居中
+   ========================================================================== */
+#qs-subtab-replace .form-table th {
+    vertical-align: top;
+    padding: 16px 14px 16px 0;
+    line-height: 1.5;
+}
+
+#qs-subtab-replace .form-table td {
+    vertical-align: top;
+    padding: 14px 10px 18px 0;
+}
+
+/* 自动填入当前站点地址按钮：确保内部文字与 code 严格垂直水平居中 */
+#qs-btn-fill-home-url {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    vertical-align: middle !important;
+    gap: 6px !important;
+    min-height: 28px !important;
+    height: 28px !important;
+    line-height: 1 !important;
+    padding: 0 10px !important;
+    font-size: 12px !important;
+    color: #0369a1 !important;
+    background: #f0f9ff !important;
+    border: 1px solid #bae6fd !important;
+    border-radius: 6px !important;
+    box-shadow: none !important;
+    transition: all 0.16s ease !important;
+}
+
+#qs-btn-fill-home-url:hover,
+#qs-btn-fill-home-url:focus {
+    background: #e0f2fe !important;
+    border-color: #7dd3fc !important;
+    color: #0284c7 !important;
+    outline: none !important;
+}
+
+#qs-btn-fill-home-url code {
+    display: inline-flex !important;
+    align-items: center !important;
+    line-height: 1 !important;
+    padding: 2px 6px !important;
+    margin: 0 !important;
+    font-size: 11px !important;
+    color: #0f172a !important;
+    background: rgba(15, 23, 42, 0.08) !important;
+    border-radius: 4px !important;
+    font-family: Consolas, Monaco, monospace !important;
+    vertical-align: middle !important;
+}
+
+/* 开始执行替换按钮：彻底解决文字不居中问题 */
+#qs-btn-start-replace {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    min-height: 36px !important;
+    height: 36px !important;
+    line-height: 1 !important;
+    padding: 0 24px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.02em !important;
+    border-radius: 6px !important;
+    cursor: pointer !important;
+    vertical-align: middle !important;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
+    transition: all 0.16s ease !important;
+}
+
+#qs-btn-start-replace:hover,
+#qs-btn-start-replace:focus {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
+}
+
+/* 通用安全替换核心表批量操作按钮统一居中对齐 */
+.qs-subtab-inline-btn,
+#qs-subtab-replace .button-small {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 26px !important;
+    height: 26px !important;
+    line-height: 1 !important;
+    padding: 0 10px !important;
+    font-size: 12px !important;
+    border-radius: 4px !important;
+    vertical-align: middle !important;
+}
+
+/* ==========================================================================
+   全局统一弹窗系统 (Qiling Security Modal & Toast System)
+   ========================================================================== */
+body.qs-modal-lock {
+    overflow: hidden !important;
+}
+
+.qs-global-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 100150;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.qs-global-modal.is-open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.qs-global-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.qs-global-modal__dialog {
+    position: relative;
+    width: 100%;
+    max-width: 520px;
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 20px 40px -12px rgba(15, 23, 42, 0.25), 0 0 0 1px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+    transform: scale(0.95) translateY(8px);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    z-index: 1;
+}
+
+.qs-global-modal.is-open .qs-global-modal__dialog {
+    transform: scale(1) translateY(0);
+}
+
+.qs-global-modal__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 22px 24px 16px;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.qs-global-modal__badge {
+    width: 42px;
+    min-width: 42px;
+    height: 42px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+.qs-global-modal__badge .dashicons {
+    font-size: 22px;
+    width: 22px;
+    height: 22px;
+}
+
+.qs-global-modal__badge.is-danger {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+.qs-global-modal__badge.is-warning {
+    background: #fffbeb;
+    color: #d97706;
+}
+
+.qs-global-modal__badge.is-success {
+    background: #ecfdf5;
+    color: #059669;
+}
+
+.qs-global-modal__badge.is-primary {
+    background: #eff6ff;
+    color: #2563eb;
+}
+
+.qs-global-modal__heading {
+    flex: 1;
+    min-width: 0;
+}
+
+.qs-global-modal__eyebrow {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    margin-bottom: 3px;
+}
+
+.qs-global-modal__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.35;
+}
+
+.qs-global-modal__close {
+    border: 0;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 24px;
+    line-height: 1;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+    margin: -4px -6px 0 0;
+}
+
+.qs-global-modal__close:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+.qs-global-modal__body {
+    padding: 20px 24px;
+    font-size: 14px;
+    line-height: 1.7;
+    color: #334155;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.qs-global-modal__lead {
+    font-size: 15px;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 0 0 10px;
+    line-height: 1.5;
+}
+
+.qs-global-modal__box {
+    margin: 12px 0 0;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    color: #475569;
+}
+
+.qs-global-modal__box.is-danger {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #991b1b;
+}
+
+.qs-global-modal__box.is-warning {
+    background: #fffbeb;
+    border-color: #fde68a;
+    color: #92400e;
+}
+
+.qs-global-modal__footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 16px 24px 20px;
+    background: #f8fafc;
+    border-top: 1px solid #f1f5f9;
+}
+
+.qs-global-modal__footer .button {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    line-height: 1 !important;
+    padding: 0 20px !important;
+    font-size: 13.5px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+    transition: all 0.16s ease !important;
+}
+
+.qs-global-modal__cancel {
+    border: 1px solid #cbd5e1 !important;
+    background: #ffffff !important;
+    color: #475569 !important;
+}
+
+.qs-global-modal__cancel:hover,
+.qs-global-modal__cancel:focus {
+    border-color: #94a3b8 !important;
+    background: #f1f5f9 !important;
+    color: #1e293b !important;
+}
+
+.qs-global-modal__confirm {
+    border-color: #2563eb !important;
+    background: #2563eb !important;
+    color: #ffffff !important;
+}
+
+.qs-global-modal__confirm:hover,
+.qs-global-modal__confirm:focus {
+    border-color: #1d4ed8 !important;
+    background: #1d4ed8 !important;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+}
+
+.qs-global-modal__confirm.is-danger {
+    border-color: #dc2626 !important;
+    background: #dc2626 !important;
+    color: #ffffff !important;
+}
+
+.qs-global-modal__confirm.is-danger:hover,
+.qs-global-modal__confirm.is-danger:focus {
+    border-color: #b91c1c !important;
+    background: #b91c1c !important;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+}
+
+.qs-global-modal__confirm.is-warning {
+    border-color: #d97706 !important;
+    background: #d97706 !important;
+    color: #ffffff !important;
+}
+
+.qs-global-modal__confirm.is-warning:hover,
+.qs-global-modal__confirm.is-warning:focus {
+    border-color: #b45309 !important;
+    background: #b45309 !important;
+    color: #ffffff !important;
+    transform: translateY(-1px);
+}
+
+/* ==========================================================================
+   全局 Toast 轻提示系统
+   ========================================================================== */
+.qs-toast-container {
+    position: fixed;
+    top: 48px;
+    right: 24px;
+    z-index: 100200;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+    max-width: 440px;
+}
+
+.qs-toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 18px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 10px 25px -4px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(15, 23, 42, 0.06);
+    border-left: 4px solid #2563eb;
+    font-size: 13.5px;
+    color: #1e293b;
+    line-height: 1.5;
+    transform: translateX(110%);
+    opacity: 0;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.qs-toast.is-visible {
+    transform: translateX(0);
+    opacity: 1;
+}
+
+.qs-toast.is-leaving {
+    transform: translateX(110%);
+    opacity: 0;
+}
+
+.qs-toast--success {
+    border-left-color: #10b981;
+}
+
+.qs-toast--error {
+    border-left-color: #ef4444;
+}
+
+.qs-toast--warning {
+    border-left-color: #f59e0b;
+}
+
+.qs-toast--info {
+    border-left-color: #2563eb;
+}
+
+.qs-toast__icon {
+    font-size: 18px;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+}
+
+.qs-toast--success .qs-toast__icon { color: #10b981; }
+.qs-toast--error .qs-toast__icon { color: #ef4444; }
+.qs-toast--warning .qs-toast__icon { color: #f59e0b; }
+.qs-toast--info .qs-toast__icon { color: #2563eb; }
+
+.qs-toast__content {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.qs-toast__close {
+    border: 0;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+.qs-toast__close:hover {
+    color: #1e293b;
+    background: #f1f5f9;
 }
